@@ -3,7 +3,6 @@ import datetime
 import re
 from logzero import logger as log
 from peewee import fn
-from pprint import pprint
 from telegram import Message as TelegramMessage, ParseMode
 from telegram.ext import ConversationHandler, run_async
 
@@ -23,13 +22,34 @@ except:
 
 
 def extract_bot_mentions(message: TelegramMessage):
+    """
+    Extract bot @usernames from a message.
+    Returns a list of usernames that likely refer to bots.
+    """
     text = message.text
+    if not text:
+        return []
 
-    matches = re.findall(settings.REGEX_BOT_IN_TEXT, text)
-    pprint(matches)
+    matches = re.findall(settings.REGEX_BOT_ONLY, text)
 
-    # If it ends in "bot", we can be sure it's a bot.
-    # Other ones will be thrown away, assuming that we already have all the verified bots
+    # Filter to likely bots: usernames ending in "bot" or already in our database
+    bot_usernames = []
+    for username in matches:
+        normalized = username.lower()
+        if normalized == "@" + settings.SELF_BOT_NAME.lower():
+            continue
+        # If it ends in "bot", we can be sure it's a bot
+        if normalized.endswith("bot"):
+            bot_usernames.append(username)
+        else:
+            # Check if we already have this username in the database
+            try:
+                Bot.by_username(username)
+                bot_usernames.append(username)
+            except Bot.DoesNotExist:
+                pass
+
+    return bot_usernames
 
 
 def notify_bot_offline(bot, update, args=None):

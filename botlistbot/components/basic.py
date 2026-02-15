@@ -177,16 +177,17 @@ def delete_botlistchat_promotions(bot, update, chat_data, update_queue):
 
 
 def plaintext_group(bot, update, chat_data, update_queue):
+    # Handle channel posts (e.g. from @BotList channel) to sync bot data
     if update.channel_post:
-        return new_channel_post(bot, update)
+        try:
+            return new_channel_post(bot, update)
+        except Exception as e:
+            log.error(f"Error processing channel post: {e}")
+            return
 
     msg: Message = update.effective_message
-
-    if datetime.now() < datetime(2020, 2, 18):
-        if "bot" in msg.text and "boot" not in msg.text:
-            if random() > 0.7:
-                msg = update.effective_message.reply_text("*boot")
-                try_delete_after(appglobals.job_queue, msg, 20)
+    if not msg or not msg.text:
+        return
 
 
 def cancel(bot, update):

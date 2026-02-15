@@ -35,8 +35,6 @@ def main():
     if settings.is_sentry_enabled():
         sentry_sdk.init(settings.SENTRY_URL, environment=settings.SENTRY_ENVIRONMENT)
 
-    botchecker_context = {}
-
     bot_token = str(settings.BOT_TOKEN)
 
     botlistbot = BotListBot(
@@ -53,10 +51,25 @@ def main():
 
     appglobals.job_queue = updater.job_queue
 
-    # Get the dispatcher to on_mount handlers
+    # Initialize the BotChecker for pinging bots
+    bot_checker = None
+    if settings.RUN_BOTCHECKER:
+        try:
+            from botlistbot.components.userbot import (
+                initialize_bot_checker,
+                start_bot_checker,
+            )
+
+            bot_checker = initialize_bot_checker()
+            if bot_checker:
+                start_bot_checker(updater.job_queue, bot_checker)
+        except Exception as e:
+            log.warning(f"BotChecker initialization skipped: {e}")
+
+    # Get the dispatcher to register handlers
     dp = updater.dispatcher
 
-    routing.register(dp, None)
+    routing.register(dp, bot_checker)
     basic.register(dp)
 
     updater.job_queue.run_repeating(admin.last_update_job, interval=3600 * 24)

@@ -1,7 +1,7 @@
 import json
 import traceback
 
-from peewee import DoesNotExist
+from peewee import DoesNotExist, fn
 import re
 from functools import partial
 from logzero import logger as log
@@ -307,16 +307,30 @@ def callback_router(bot, update, chat_data, user_data, job_queue):
 
 
 def forward_router(bot, update, chat_data):
-    text = update.effective_message.text
+    message = update.effective_message
 
-    # match first username in forwarded message
+    # First, check if the message was forwarded FROM a bot (sender metadata)
+    forward_from = message.forward_from
+    if forward_from and forward_from.is_bot:
+        username = "@" + forward_from.username if forward_from.username else None
+        if username and username != "@" + settings.SELF_BOT_NAME:
+            try:
+                item = Bot.get(fn.lower(Bot.username) == username.lower())
+                send_bot_details(bot, update, chat_data, item)
+                return
+            except DoesNotExist:
+                pass
+
+    # Fallback: match first @username in the forwarded message text
+    text = message.text
+    if not text:
+        return
     try:
         username = re.match(settings.REGEX_BOT_IN_TEXT, text).groups()[0]
         if username == "@" + settings.SELF_BOT_NAME:
             return  # ignore
 
-        item = Bot.get(Bot.username == username)
-
+        item = Bot.get(fn.lower(Bot.username) == username.lower())
         send_bot_details(bot, update, chat_data, item)
 
     except (AttributeError, TypeError, DoesNotExist):
@@ -324,7 +338,11 @@ def forward_router(bot, update, chat_data):
 
 
 def reply_router(bot, update, chat_data):
-    text = update.effective_message.reply_to_message.text
+    reply_to = update.effective_message.reply_to_message
+    if not reply_to:
+        return
+
+    text = reply_to.text
 
     if text == messages.ADD_FAVORITE:
         query = update.message.text
@@ -350,6 +368,16 @@ def reply_router(bot, update, chat_data):
     elif text == messages.UNBAN_MESSAGE:
         query = update.message.text
         admin.ban_handler(bot, update, query, chat_data, False)
+
+    # Auto-lookup: if replying to a bot's message, look up that bot
+    if reply_to.from_user and reply_to.from_user.is_bot:
+        username = "@" + reply_to.from_user.username if reply_to.from_user.username else None
+        if username and username != "@" + settings.SELF_BOT_NAME:
+            try:
+                item = Bot.get(fn.lower(Bot.username) == username.lower())
+                send_bot_details(bot, update, chat_data, item)
+            except DoesNotExist:
+                pass
 
 
 def register(dp: Dispatcher, bot_checker: "BotChecker"):

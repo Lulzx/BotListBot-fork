@@ -13,15 +13,39 @@ import time
 import traceback
 from datetime import datetime, timedelta
 from logzero import logger as log
-from pyrogram.api.functions.contacts import search
-from pyrogram.api.functions.messages import DeleteHistory
-from pyrogram.api.functions.users import GetUsers
-from pyrogram.api.types import InputPeerUser
-from pyrogram.api.types.contacts import ResolvedPeer
-from pyrogram.errors import *
+
+# Modern Pyrogram (v2+) uses pyrogram.raw instead of pyrogram.api
+try:
+    from pyrogram.raw.functions.contacts import ResolveUsername as Search
+    from pyrogram.raw.functions.messages import DeleteHistory
+    from pyrogram.raw.functions.users import GetUsers
+    from pyrogram.raw.types import InputPeerUser
+    from pyrogram.raw.types.contacts import ResolvedPeer
+except ImportError:
+    # Fallback for older Pyrogram versions
+    from pyrogram.api.functions.contacts import search as Search
+    from pyrogram.api.functions.messages import DeleteHistory
+    from pyrogram.api.functions.users import GetUsers
+    from pyrogram.api.types import InputPeerUser
+    from pyrogram.api.types.contacts import ResolvedPeer
+
+from pyrogram.errors import (
+    FloodWait,
+    QueryTooShort,
+    UnknownError,
+    UsernameInvalid,
+    UsernameNotOccupied,
+)
 from telegram import Bot as TelegramBot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
-from tgintegration import InlineResultContainer, InteractionClientAsync, Response
+
+try:
+    from tgintegration import InlineResultContainer, InteractionClientAsync, Response
+except ImportError:
+    InteractionClientAsync = None
+    InlineResultContainer = None
+    Response = None
+
 from typing import Union
 
 from botlistbot import captions
@@ -81,24 +105,30 @@ def zero_width_encoding(encoded_string):
     return None
 
 
-class BotChecker(InteractionClientAsync):
+_BaseClass = InteractionClientAsync if InteractionClientAsync is not None else object
+
+
+class BotChecker(_BaseClass):
     def __init__(self, event_loop, session_name, api_id, api_hash, phone_number, workdir=None):
 
         self.event_loop = event_loop
         self.username_flood_until = None
         self._message_intervals = {}
         self._last_ping = None
-        self.__photos_lock = asyncio.Lock(loop=self.event_loop)
+        self.__photos_lock = asyncio.Lock()
 
-        super(BotChecker, self).__init__(
-            session_name,
-            api_id,
-            api_hash,
-            workers=4,
-            phone_number=phone_number,
-            workdir=workdir
-        )
-        self.logger.setLevel(logging.WARNING)
+        if InteractionClientAsync is not None:
+            super(BotChecker, self).__init__(
+                session_name,
+                api_id,
+                api_hash,
+                workers=4,
+                phone_number=phone_number,
+                workdir=workdir
+            )
+            self.logger.setLevel(logging.WARNING)
+        else:
+            log.warning("tgintegration not available, BotChecker running in limited mode")
 
     async def schedule_conversation_deletion(self, peer, delay=5):
         await asyncio.sleep(delay)
@@ -202,20 +232,10 @@ class BotChecker(InteractionClientAsync):
         if bot.chat_id:
             try:
                 return self.resolve_peer(bot.chat_id)
-            except:
+            except Exception:
                 pass
 
-        try:
-            results = self.send(Search(bot.username, limit=3))
-            if results.users:
-                try:
-                    return next(
-                        s for s in results.users if s.username.lower() == bot.username[1:].lower())
-                except StopIteration:
-                    pass
-        except QueryTooShort:
-            pass
-
+        # Try resolving by username directly
         if self.username_flood_until:
             if self.username_flood_until < datetime.now():
                 self.username_flood_until = None
@@ -223,12 +243,13 @@ class BotChecker(InteractionClientAsync):
             try:
                 return self.resolve_peer(bot.username)
             except FloodWait as e:
+                wait_seconds = getattr(e, 'x', getattr(e, 'value', 60))
                 self.username_flood_until = datetime.now() + timedelta(
-                    seconds=e.x)
+                    seconds=wait_seconds)
                 log.warning("Flood wait for ResolveUsername: {}s (until {})".format(
-                    e.x, self.username_flood_until))
+                    wait_seconds, self.username_flood_until))
             except UsernameInvalid as e:
-                log.error(e)  # TODO
+                log.error(e)
 
         return None
 
@@ -247,10 +268,8 @@ class BotChecker(InteractionClientAsync):
                         block=True
                     )
                 except FloodWait as e:
-                    # TODO: as the error happens inside of the update worker, this won't work (yet)
-                    # Leaving it in as the default behavior should be to raise the FloodWait
-                    # when block=True
-                    log.debug(f"FloodWait for downloading media ({e.x})")
+                    wait_seconds = getattr(e, 'x', getattr(e, 'value', 60))
+                    log.debug(f"FloodWait for downloading media ({wait_seconds})")
 
                 if os.path.exists(tmp_file):
                     try:
