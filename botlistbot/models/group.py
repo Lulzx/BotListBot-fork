@@ -6,7 +6,7 @@ from botlistbot.models.basemodel import BaseModel
 
 class Group(BaseModel):
     id = PrimaryKeyField()
-    chat_id = IntegerField(unique=True)
+    chat_id = BigIntegerField(unique=True)
     title = CharField()
 
     @staticmethod

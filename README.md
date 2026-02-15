@@ -1,86 +1,129 @@
 # The Telegram @BotListBot
 
-This is the Chatbot in charge of maintaining the [Telegram BotList](https://t.me/botlist), a channel that is a community-driven approach to collect the best Bots on Telegram. 
+This is the Chatbot in charge of maintaining the [Telegram BotList](https://t.me/botlist), a channel that is a community-driven approach to collect the best Bots on Telegram.
 
 The bot simplifies navigation by acting as a mirror of the BotList, and automates the process of submitting, reviewing and publishing bots by the [BotListChat](https://t.me/botlistchat) community.
 
+Licensed under the MIT License.
 
-This repository is meant as inspiration and technical guidance for bot builders, mainly for folks using the amazing [python-telegram-bot](https://python-telegram-bot.org/) library.
+## Quickstart (5 minutes)
 
-JosXa/BotListBot is licensed under the MIT License.
+You need: **Python 3.7+**, **Docker**, and a **Telegram bot token** from [@BotFather](https://t.me/BotFather).
 
+```bash
+# 1. Clone and enter the repo
+git clone https://github.com/JosXa/BotListBot.git
+cd BotListBot
 
-## Setup Guide
+# 2. Start PostgreSQL
+docker-compose up -d
 
-### Prerequesites
+# 3. Install dependencies
+pip install pipenv
+pipenv install
 
-#### Mandatory
+# 4. Configure environment
+cp template.env .env
+#    Now edit .env — at minimum set these two:
+#      BOT_TOKEN=<your token from @BotFather>
+#      DEVELOPER_ID=<your Telegram user ID>
 
-- Python 3.7.x
-- A PostgreSQL database instance or Docker ([see below](#development-setup))
-- Pipenv installed globally (`pip install pipenv`)
-- Your own bot token for local development
+# 5. Create and seed the database
+pipenv run python scripts/initialize_database.py seed
 
-#### Optional
+# 6. Run the bot
+pipenv run python -m botlistbot.main
+```
 
-- A sentry.io account (logging)
-- An S3-compatible object storage (e.g. Minio)
+The bot will send you "Ready to rock" on Telegram when it's up.
 
-### Development Setup
+### How to find your Telegram user ID
 
-<details>
-<summary>Using GitHub codespaces and VSCode (<b>recommended</b>)</summary>
+Message [@userinfobot](https://t.me/userinfobot) on Telegram. It will reply with your numeric ID. Put that number in `DEVELOPER_ID` in your `.env` file, and add it to the `ADMINS` list in `botlistbot/settings.py` if you want admin access.
 
-<i>Recommended because it is the fastest option to get you started.</i>
+### Stopping
 
-1. On [GitHub Codespaces](https://github.com/codespaces), enter "`JosXa/BotListBot`" and create your dev container.
-1. Modify the variables in `template.env` and save the file as just `.env` in the root folder of the checkout.
-1. Run the project via `pipenv run python -m botlistbot.main`
+```bash
+# Stop the bot: Ctrl+C in the terminal
+# Stop the database:
+docker-compose down
+```
 
-</details>  
+## Configuration
 
-<details>
+All settings are in `botlistbot/settings.py` and loaded from the `.env` file via `python-decouple`.
 
-<summary>Using PyCharm...</summary>
+| Variable | Required | Description |
+|---|---|---|
+| `BOT_TOKEN` | Yes | Telegram bot token from @BotFather |
+| `DEVELOPER_ID` | Yes | Your Telegram user ID (receives error reports and startup message) |
+| `DATABASE_URL` | Yes | PostgreSQL connection string (default works with docker-compose) |
+| `DEV` | No | Set to `True` for polling mode (default). `False` uses webhooks. |
+| `RUN_BOTCHECKER` | No | Set to `True` to enable the background bot checker worker |
+| `API_ID` | If botchecker | Telegram API ID from https://my.telegram.org |
+| `API_HASH` | If botchecker | Telegram API hash |
+| `USERBOT_SESSION` | If botchecker | Pyrogram session name for the checker userbot |
+| `USERBOT_PHONE` | If botchecker | Phone number for the checker userbot |
+| `SENTRY_URL` | No | Sentry DSN for error tracking |
+| `SENTRY_ENVIRONMENT` | No | Sentry environment name |
 
-##### Set up a PostgreSQL database instance with Docker
+## Database
 
-1. Install Docker
-1. Run `docker-compose up -d`
-1. Create and seed the database via `pipenv run python scripts/initialize_database.py seed`
-1. To stop the database, run `docker-compose down`
+### Fresh setup
 
-##### Set up BotListBot
-    
-1. VCS -> Get from Version Control... -> `https://github.com/JosXa/BotListBot` (or your own fork)
-1. Add a new project Interpreter using Pipenv (**not virtualenv**) and let PyCharm install the packages for you
-1. Modify the variables in `template.env` and save the file as just `.env` in the root folder
-1. Run the file `scripts/initialize_database.py` once. Then open its run configuration, add the word "seed" to the 
-arguments list, and run it again. This will fill the database with some initial, required values.
-1. Run `botlistbot/main.py` using a default configuration
-</details>  
+```bash
+pipenv run python scripts/initialize_database.py seed
+```
 
-<details>
-<summary>Not using PyCharm...</summary>
+This creates all tables and inserts initial categories and a revision number.
 
-##### Set up a PostgreSQL database instance with Docker
+### Migrating an existing database
 
-1. Install Docker
-1. Run `docker-compose up -d`
-1. Create and seed the database via `pipenv run python scripts/initialize_database.py seed`
-1. To stop the database, run `docker-compose down`
+If upgrading from an older version, run the BigInt migration to support newer Telegram user IDs:
 
-##### Set up BotListBot
+```bash
+pipenv run python -m botlistbot.migration.bigint_ids
+```
 
-1. Clone from GitHub: `git clone https://github.com/JosXa/BotListBot` (or your own fork)
-1. Run `pipenv install`
-1. Modify the variables in `template.env` and save the file as just `.env` in the root folder of the checkout.
-1. Create and seed the database via `pipenv run python scripts/initialize_database.py seed`
-1. Run the project via `pipenv run python -m botlistbot.main`
-</details>  
+This is needed because Telegram user IDs now exceed the 32-bit integer limit (~2.1 billion). Older databases used `INTEGER` columns that cannot store these IDs. The migration widens them to `BIGINT`.
 
-#### Further details on configuration
+## Project Structure
 
-If you have a look at [settings.py](https://github.com/JosXa/BotListBot/blob/master/botlistbot/settings.py), you can 
-see a bunch of environment variables that are being retrieved via `decouple.config(...)` calls.
-Those settings can be controlled via the `.env` file you created at the root folder.
+```
+botlistbot/
+    main.py                  # Entry point
+    settings.py              # All configuration
+    routing.py               # Handler registration and callback/forward/reply routing
+    models/                  # Peewee ORM models (Bot, User, Category, etc.)
+    components/
+        admin.py             # Admin panel, bot approval, suggestions
+        basic.py             # /start, main menu, channel post handler
+        botlist.py           # Publishing the categorized bot list to @BotList channel
+        botlistchat.py       # @BotListChat group management, hints
+        botproperties.py     # Editing bot metadata
+        broadcasts.py        # Admin broadcast messages
+        contributions.py     # /new, /offline, /spam submissions
+        explore.py           # Category browsing, bot details
+        favorites.py         # User favorites
+        inlinequeries.py     # Inline query handler
+        search.py            # Search functionality
+        userbot.py           # BotChecker bridge (Pyrogram userbot for pinging bots)
+    botcheckerworker/
+        botchecker.py        # Background worker that pings bots to check online status
+    migration/               # Database migrations
+    dialog/                  # Message templates
+    lib/                     # Utility libraries
+    assets/                  # Images, stickers, GIFs
+scripts/
+    initialize_database.py   # Database creation and seeding
+```
+
+## Key Features
+
+- **Bot Submissions**: Users submit bots via `/new @botname` or `#new @botname` in @BotListChat
+- **Admin Panel**: `/admin` for moderators to approve, edit, and manage bots
+- **Channel Publishing**: Admins can push the full categorized bot list to the @BotList channel
+- **Bot Checker**: Background worker pings all bots periodically to detect offline/online status
+- **Search**: `/search` or inline query for finding bots
+- **Favorites**: Users can save and manage favorite bots
+- **Forward/Reply Detection**: Forward a message from a bot or reply to one to auto-lookup its details

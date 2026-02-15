@@ -7,7 +7,7 @@ from botlistbot.models.basemodel import BaseModel
 
 class Message(BaseModel):
     message_id = PrimaryKeyField()
-    chat_id = IntegerField(unique=True)
+    chat_id = BigIntegerField(unique=True)
     command = CharField(choices=['offline', 'spam', 'new'])
     entity = ForeignKeyField(Bot)
 

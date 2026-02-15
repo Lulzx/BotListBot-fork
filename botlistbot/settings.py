@@ -32,7 +32,7 @@ MODERATORS = [
     200344026,  # the scientist
     234480941,  # the one and only twitface
 ] + ADMINS
-DEVELOPER_ID = config("DEVELOPER_ID", default=62056065)
+DEVELOPER_ID = config("DEVELOPER_ID", default=62056065, cast=int)
 BOT_CONSIDERED_NEW = 1  # Revision difference
 WORKER_COUNT = 5 if DEV else 40
 TEST_BOT_NAME = "gottesgebot"

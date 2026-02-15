@@ -12,7 +12,7 @@ from botlistbot.models.basemodel import BaseModel
 
 class User(BaseModel):
     id = PrimaryKeyField()
-    chat_id = IntegerField()
+    chat_id = BigIntegerField()
     username = CharField(null=True)
     first_name = CharField(null=True)
     last_name = CharField(null=True)

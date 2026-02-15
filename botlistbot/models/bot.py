@@ -51,7 +51,7 @@ class Bot(BaseModel):
 
     userbot = BooleanField(default=False)
     botbuilder = BooleanField(default=False)
-    chat_id = IntegerField(null=True)
+    chat_id = BigIntegerField(null=True)
 
     approved = BooleanField(default=True)
     submitted_by = ForeignKeyField(User, null=True, related_name='submitted_by')
