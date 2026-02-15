@@ -1,23 +1,18 @@
-from typing import *
+import json
+from typing import Any, Dict, Optional, Union
 from uuid import uuid4
-from redis_collections import Dict as RedisDict
 from telegram import InlineKeyboardButton
-
-from botlistbot.models import User
 
 
 class CallbackManager:
-    def __init__(self, redis, user: User):
-        self.redis = redis
-        key = 'callbacks_{}'.format(user.id)
-        self._callbacks = RedisDict(redis=redis, key=key)
+    def __init__(self, redis_client, user):
+        self.redis = redis_client
+        self._key = f'callbacks_{user.id}'
 
     def create_callback(self, action: int, data: Dict) -> str:
         id_ = str(uuid4())
-
         callback = dict(action=action, data=data)
-        self._callbacks[id_] = callback
-
+        self.redis.hset(self._key, id_, json.dumps(callback))
         return id_
 
     def inline_button(self, caption: str, action: int, data: Dict = None) -> InlineKeyboardButton:
@@ -26,5 +21,8 @@ class CallbackManager:
             callback_data=self.create_callback(action, data)
         )
 
-    def lookup_callback(self, id_: Union[str, uuid4]) -> Any:
-        return self._callbacks.get(id_)
+    def lookup_callback(self, id_: Union[str, uuid4]) -> Optional[Any]:
+        raw = self.redis.hget(self._key, id_)
+        if raw is None:
+            return None
+        return json.loads(raw)

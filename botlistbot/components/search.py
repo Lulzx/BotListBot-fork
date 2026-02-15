@@ -4,16 +4,15 @@ from telegram import (
     Message,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
-    ParseMode,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     ForceReply,
     Update,
     TelegramError,
 )
-from telegram.ext import ConversationHandler, run_async
+from telegram.constants import ParseMode
+from telegram.ext import ConversationHandler
 
-from botlistbot import appglobals
 from botlistbot import captions
 from botlistbot import const
 from botlistbot import search
@@ -27,7 +26,7 @@ from botlistbot.helpers import try_delete_after
 from botlistbot.models import User
 
 
-def search_query(bot, update: Update, chat_data, query, send_errors=True):
+async def search_query(update, context, query, send_errors=True):
     cid: int = update.effective_chat.id
     user: User = User.from_update(update)
     is_admin: bool = cid in settings.MODERATORS
@@ -45,13 +44,13 @@ def search_query(bot, update: Update, chat_data, query, send_errors=True):
     )
     if results:
         if len(results) == 1:
-            update.effective_message.delete()
+            await update.effective_message.delete()
             if is_suggestion_by_other:
                 header = f"{user.markdown_short} found the following bot for you:"
             else:
                 header = "I found the following bot for you:"
-            return send_bot_details(
-                bot, update, chat_data, results[0], header_msg=header
+            return await send_bot_details(
+                update, context, results[0], header_msg=header
             )
         too_many_results = len(results) > settings.MAX_SEARCH_RESULTS
 
@@ -75,16 +74,16 @@ def search_query(bot, update: Update, chat_data, query, send_errors=True):
 
         if util.is_group_message(update) and not update.message.reply_to_message:
             try:
-                bot.formatter.send_message(
+                await context.bot.formatter.send_message(
                     update.effective_user.id,
                     bots_list,
                     reply_markup=reply_markup,
                     disable_web_page_preview=True,
                 )
                 reply_markup, callback = botlistchat.append_restricted_delete_button(
-                    update, chat_data, InlineKeyboardMarkup([[]])
+                    update, context.chat_data, InlineKeyboardMarkup([[]])
                 )
-                msg = bot.formatter.send_message(
+                msg = await context.bot.formatter.send_message(
                     update.effective_chat.id,
                     f"Hey {user.plaintext}, let's not annoy the others. I sent you the search results "
                     f"[in private chat](https://t.me/{settings.SELF_BOT_NAME}).",
@@ -92,10 +91,10 @@ def search_query(bot, update: Update, chat_data, query, send_errors=True):
                     reply_markup=reply_markup,
                 )
                 callback(msg)
-                update.effective_message.delete()
+                await update.effective_message.delete()
             except TelegramError:
                 hint_msg, hint_reply_markup, _ = get_hint_data("#private")
-                bot.formatter.send_message(
+                await context.bot.formatter.send_message(
                     update.effective_chat.id,
                     hint_msg,
                     reply_markup=hint_reply_markup,
@@ -107,7 +106,7 @@ def search_query(bot, update: Update, chat_data, query, send_errors=True):
         if is_suggestion_by_other and replied_to_message_id:
             bots_list = f"{user.markdown_short} suggests to search and {bots_list}"
 
-        bot.formatter.send_message(
+        await context.bot.formatter.send_message(
             update.effective_chat.id,
             bots_list,
             parse_mode=ParseMode.MARKDOWN,
@@ -115,15 +114,15 @@ def search_query(bot, update: Update, chat_data, query, send_errors=True):
             disable_web_page_preview=True,
             reply_to_message_id=replied_to_message_id,
         )
-        update.effective_message.delete()
+        await update.effective_message.delete()
     else:
         if send_errors:
             callback = None
             if util.is_group_message(update):
                 reply_markup, callback = botlistchat.append_restricted_delete_button(
-                    update, chat_data, InlineKeyboardMarkup([[]])
+                    update, context.chat_data, InlineKeyboardMarkup([[]])
                 )
-            msg = update.message.reply_text(
+            msg = await update.message.reply_text(
                 util.failure(
                     "Sorry, I couldn't find anything related "
                     "to *{}* in the @BotList. /search".format(
@@ -139,15 +138,14 @@ def search_query(bot, update: Update, chat_data, query, send_errors=True):
     return ConversationHandler.END
 
 
-@run_async
-def search_handler(bot, update, chat_data, args=None):
-    if args:
-        search_query(bot, update, chat_data, " ".join(args))
+async def search_handler(update, context):
+    if context.args:
+        await search_query(update, context, " ".join(context.args))
     else:
         # no search term
         if util.is_group_message(update):
             action = const.DeepLinkingActions.SEARCH
-            sent_msg = update.message.reply_text(
+            sent_msg = await update.message.reply_text(
                 "Please use the search command with arguments, inlinequeries or continue in private. "
                 "Example: `/search awesome bot`",
                 quote=True,
@@ -168,11 +166,11 @@ def search_handler(bot, update, chat_data, args=None):
                     ]
                 ),
             )
-            try_delete_after(
-                appglobals.job_queue, [sent_msg, update.effective_message], delay=10
+            await try_delete_after(
+                context, [sent_msg, update.effective_message], delay=10
             )
         else:
-            update.message.reply_text(
+            await update.message.reply_text(
                 messages.SEARCH_MESSAGE, reply_markup=ForceReply(selective=True)
             )
     return ConversationHandler.END

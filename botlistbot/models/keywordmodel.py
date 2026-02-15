@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from peewee import *
 from typing import Set
 
@@ -7,13 +6,13 @@ from botlistbot.models.bot import Bot
 
 
 class Keyword(BaseModel):
-    id = PrimaryKeyField()
+    id = AutoField()
     name = CharField()
     entity = ForeignKeyField(Bot)
 
     class Meta:
         indexes = (
-            (('entity', 'name'), True),  # Note the trailing comma!
+            (('entity', 'name'), True),
         )
 
     def __str__(self):

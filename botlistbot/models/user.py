@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import inflect
 from peewee import *
 
@@ -11,7 +10,7 @@ from botlistbot.models.basemodel import BaseModel
 
 
 class User(BaseModel):
-    id = PrimaryKeyField()
+    id = AutoField()
     chat_id = BigIntegerField()
     username = CharField(null=True)
     first_name = CharField(null=True)
@@ -63,19 +62,17 @@ class User(BaseModel):
             text += '[{}](https://t.me/{})'.format(full_name, self.username)
         else:
             text += full_name
-        return text.encode('utf-8').decode('utf-8')
-
+        return text
     @property
     def markdown_short(self):
         displayname = ''
         if self.first_name:
-            displayname = util.escape_markdown(self.first_name.encode('utf-8').decode('utf-8'))
+            displayname = util.escape_markdown(self.first_name)
         if self.username:
             text = '[👤 {}](https://t.me/{})'.format(displayname, util.escape_markdown(self.username))
         else:
             text = displayname
-        return text.encode('utf-8').decode('utf-8')
-
+        return text
     @property
     def plaintext(self):
         text = '👤 '  # emoji
@@ -83,8 +80,7 @@ class User(BaseModel):
             text += self.first_name
         if self.last_name:
             text += " " + self.last_name
-        return text.encode('utf-8').decode('utf-8')
-
+        return text
 
     @staticmethod
     def by_username(username: str):

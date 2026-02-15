@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import os
 from datetime import timedelta
 from enum import IntEnum
@@ -29,7 +28,7 @@ class Bot(BaseModel):
             elif value == cls.offline:
                 return "has been offline for too long"
 
-    id = PrimaryKeyField()
+    id = AutoField()
     revision = IntegerField()
     category = ForeignKeyField(Category, null=True)
     name = CharField(null=True)
@@ -140,7 +139,7 @@ class Bot(BaseModel):
         return self.revision >= Revision.get_instance().nr - settings.BOT_CONSIDERED_NEW + 1
 
     def __str__(self):
-        return util.escape_markdown(self.str_no_md).encode('utf-8').decode('utf-8')
+        return util.escape_markdown(self.str_no_md)
 
     @property
     def detail_text(self):

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import datetime
 
 from peewee import *
@@ -265,5 +264,5 @@ class Suggestion(BaseModel):
         return text
 
     def __str__(self):
-        text = self.user.markdown_short + ": " + self._md_plaintext().encode('utf-8').decode('utf-8')
+        text = self.user.markdown_short + ": " + self._md_plaintext()
         return text

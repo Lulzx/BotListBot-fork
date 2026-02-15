@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import datetime
 from typing import List
 
@@ -14,13 +13,13 @@ from botlistbot.models.user import User
 
 
 class Favorite(BaseModel):
-    id = PrimaryKeyField()
+    id = AutoField()
     user = ForeignKeyField(User)
     bot = ForeignKeyField(Bot, null=True)
     custom_bot = CharField(null=True)
     date_added = DateField()
 
-    CUSTOM_CATEGORY = Category(id=1000, order=1000, emojis='👤', name='Others')
+    CUSTOM_CATEGORY = Category(id=1000, order=1000, emojis='\U0001f464', name='Others')
 
     @staticmethod
     def add(user, item: Bot):

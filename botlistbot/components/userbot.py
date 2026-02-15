@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-import asyncio
 import threading
 
 from logzero import logger as log
@@ -15,10 +13,7 @@ def _create_bot_checker():
     """Create and return a BotChecker instance using the botcheckerworker module."""
     from botlistbot.botcheckerworker.botchecker import BotChecker as _BotChecker
 
-    loop = appglobals.loop
-
     checker = _BotChecker(
-        event_loop=loop,
         session_name=settings.USERBOT_SESSION,
         api_id=settings.API_ID,
         api_hash=settings.API_HASH,
@@ -74,7 +69,6 @@ def start_bot_checker(job_queue, bot_checker):
     from botlistbot.botcheckerworker.botchecker import ping_bots_job
 
     try:
-        loop = bot_checker.event_loop
         bot_checker.start()
         log.info("BotChecker userbot started.")
     except Exception as e:
@@ -86,7 +80,7 @@ def start_bot_checker(job_queue, bot_checker):
 
     job_queue.run_repeating(
         ping_bots_job,
-        context=context,
+        data=context,
         first=60,  # Start first check after 60 seconds
         interval=settings.BOTCHECKER_INTERVAL,
     )

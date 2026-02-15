@@ -1,6 +1,5 @@
-# -*- coding: utf-8 -*-
-
-from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
+from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.error import BadRequest
 
 from botlistbot import captions
@@ -23,7 +22,7 @@ def _is_clear_query(query):
     return query.lower() == CLEAR_QUERY
 
 
-def set_country_menu(bot, update, to_edit):
+async def set_country_menu(update, context, to_edit):
     uid = util.uid_from_update(update)
     countries = Country.select().order_by(Country.name).execute()
 
@@ -44,16 +43,16 @@ def set_country_menu(bot, update, to_edit):
                                                                         'bid': to_edit.id
                                                                     })),
     ])
-    return bot.formatter.send_or_edit(uid, util.action_hint(
+    return await context.bot.formatter.send_or_edit(uid, util.action_hint(
         "Please select a country/language for {}".format(to_edit)),
                                       to_edit=util.mid_from_update(update),
                                       reply_markup=InlineKeyboardMarkup(buttons))
 
 
-def set_country(bot, update, to_edit, country):
+async def set_country(update, context, to_edit, country):
     user = User.from_update(update)
 
-    if check_suggestion_limit(bot, update, user):
+    if await check_suggestion_limit(update, context, user):
         return
     if isinstance(country, Country):
         value = country.id
@@ -64,10 +63,10 @@ def set_country(bot, update, to_edit, country):
     Suggestion.add_or_update(user, 'country', to_edit, value)
 
 
-def set_text_property(bot, update, chat_data, property_name, to_edit=None):
+async def set_text_property(update, context, property_name, to_edit=None):
     uid = util.uid_from_update(update)
     user = User.from_update(update)
-    if check_suggestion_limit(bot, update, user):
+    if await check_suggestion_limit(update, context, user):
         return
 
     if to_edit:
@@ -82,33 +81,33 @@ def set_text_property(bot, update, chat_data, property_name, to_edit=None):
             ))
         if property_name == 'description':
             text += ', markdown enabled.'
-        update.effective_message.reply_text(text, reply_markup=ForceReply(selective=True),
+        await update.effective_message.reply_text(text, reply_markup=ForceReply(selective=True),
                                             parse_mode=ParseMode.MARKDOWN)
-        chat_data['edit_bot'] = to_edit
+        context.chat_data['edit_bot'] = to_edit
     elif update.message:
         value = None
         text = update.message.text
 
-        to_edit = chat_data.get('edit_bot', None)
+        to_edit = context.chat_data.get('edit_bot', None)
 
-        def too_long(n):
-            bot.formatter.send_failure(uid, "Your {} text is too long, it must be shorter "
+        async def too_long(n):
+            await context.bot.formatter.send_failure(uid, "Your {} text is too long, it must be shorter "
                                             "than {} characters. Please try again.".format(
                 property_name, n))
-            util.wait(bot, update)
-            return admin.edit_bot(bot, update, chat_data, to_edit)
+            await util.wait(update, context)
+            return await admin.edit_bot(update, context, to_edit)
 
         # Validation
         if property_name == 'description' and len(text) > 300:
-            return too_long(300)
+            return await too_long(300)
         if property_name == 'username':
             value = helpers.validate_username(text)
             if value:
-                to_edit = chat_data.get('edit_bot', None)
+                to_edit = context.chat_data.get('edit_bot', None)
             else:
-                bot.formatter.send_failure(uid,
+                await context.bot.formatter.send_failure(uid,
                                            "The username you entered is not valid. Please try again...")
-                return admin.edit_bot(bot, update, chat_data, to_edit)
+                return await admin.edit_bot(update, context, to_edit)
 
         if not value:
             value = text
@@ -118,31 +117,31 @@ def set_text_property(bot, update, chat_data, property_name, to_edit=None):
                 Suggestion.add_or_update(user, property_name, to_edit, None)
             else:
                 Suggestion.add_or_update(user, property_name, to_edit, value)
-            admin.edit_bot(bot, update, chat_data, to_edit)
+            await admin.edit_bot(update, context, to_edit)
         else:
-            bot.formatter.send_failure(uid, "An unexpected error occured.")
+            await context.bot.formatter.send_failure(uid, "An unexpected error occured.")
 
 
-def toggle_value(bot, update, property_name, to_edit, value):
+async def toggle_value(update, context, property_name, to_edit, value):
     user = User.from_update(update)
 
-    if check_suggestion_limit(bot, update, user):
+    if await check_suggestion_limit(update, context, user):
         return
     Suggestion.add_or_update(user, property_name, to_edit, bool(value))
 
 
-def set_keywords_init(bot, update, chat_data, context):
-    to_edit = context.get('to_edit')
-    chat_data['set_keywords_msg'] = util.mid_from_update(update)
-    return set_keywords(bot, update, chat_data, to_edit)
+async def set_keywords_init(update, context, kw_context):
+    to_edit = kw_context.get('to_edit')
+    context.chat_data['set_keywords_msg'] = util.mid_from_update(update)
+    return await set_keywords(update, context, to_edit)
 
 
 @track_activity('menu', 'set keywords', Statistic.DETAILED)
-def set_keywords(bot, update, chat_data, to_edit):
+async def set_keywords(update, context, to_edit):
     chat_id = util.uid_from_update(update)
     keywords = Keyword.select().where(Keyword.entity == to_edit)
-    chat_data['edit_bot'] = to_edit
-    set_keywords_msgid = chat_data.get('set_keywords_msg')
+    context.chat_data['edit_bot'] = to_edit
+    set_keywords_msgid = context.chat_data.get('set_keywords_msg')
 
     pending = Suggestion.select().where(
         Suggestion.executed == False,
@@ -183,8 +182,8 @@ def set_keywords(bot, update, chat_data, to_edit):
                                  {'id': to_edit.id}))
     ])
     reply_markup = InlineKeyboardMarkup(buttons)
-    msg = util.send_or_edit_md_message(
-        bot,
+    msg = await util.send_or_edit_md_message(
+        context.bot,
         chat_id,
         util.action_hint('Send me the keywords for {} one by one...\n\n{}'.format(
             util.escape_markdown(to_edit.username), messages.KEYWORD_BEST_PRACTICES)),
@@ -194,28 +193,28 @@ def set_keywords(bot, update, chat_data, to_edit):
     if msg:
         # message might not have been edited if the user adds an already-existing keyword
         # TODO: should the user be notified about this?
-        chat_data['set_keywords_msg'] = msg.message_id
+        context.chat_data['set_keywords_msg'] = msg.message_id
 
     return BotStates.SENDING_KEYWORDS
 
 
-def add_keyword(bot, update, chat_data):
+async def add_keyword(update, context):
     user = User.from_telegram_object(update.effective_user)
-    if check_suggestion_limit(bot, update, user):
+    if await check_suggestion_limit(update, context, user):
         return
     kw = update.message.text
-    bot_to_edit = chat_data.get('edit_bot')
+    bot_to_edit = context.chat_data.get('edit_bot')
     kw = helpers.format_keyword(kw)
 
     # Sanity checks
     if kw in settings.FORBIDDEN_KEYWORDS:
-        update.message.reply_text('The keyword {} is forbidden.'.format(kw))
+        await update.message.reply_text('The keyword {} is forbidden.'.format(kw))
         return
     if len(kw) <= 1:
-        update.message.reply_text('Keywords must be longer than 1 character.')
+        await update.message.reply_text('Keywords must be longer than 1 character.')
         return
     if len(kw) >= 20:
-        update.message.reply_text('Keywords must not be longer than 20 characters.')
+        await update.message.reply_text('Keywords must not be longer than 20 characters.')
 
     # Ignore duplicates
     try:
@@ -225,18 +224,18 @@ def add_keyword(bot, update, chat_data):
         pass
 
     Suggestion.add_or_update(user=user, action='add_keyword', subject=bot_to_edit, value=kw)
-    set_keywords(bot, update, chat_data, bot_to_edit)
+    await set_keywords(update, context, bot_to_edit)
     Statistic.of(update, 'added keyword to'.format(kw), bot_to_edit.username)
 
 
-def delete_keyword_suggestion(bot, update, chat_data, context):
-    suggestion = context.get('suggestion')
+async def delete_keyword_suggestion(update, context, kw_context):
+    suggestion = kw_context.get('suggestion')
     suggestion.delete_instance()
-    set_keywords(bot, update, chat_data, context.get('to_edit'))
+    await set_keywords(update, context, kw_context.get('to_edit'))
 
 
 @restricted
-def delete_bot_confirm(bot, update, to_edit):
+async def delete_bot_confirm(update, context, to_edit):
     chat_id = util.uid_from_update(update)
     reply_markup = InlineKeyboardMarkup([[
         InlineKeyboardButton("Yes, delete it!", callback_data=util.callback_for_action(
@@ -247,16 +246,16 @@ def delete_bot_confirm(bot, update, to_edit):
         ))
     ]]
     )
-    bot.formatter.send_or_edit(chat_id, "Are you sure?", to_edit=util.mid_from_update(update),
+    await context.bot.formatter.send_or_edit(chat_id, "Are you sure?", to_edit=util.mid_from_update(update),
                                reply_markup=reply_markup)
 
 
 @restricted
-def delete_bot(bot, update, to_edit: Bot):
+async def delete_bot(update, context, to_edit: Bot):
     username = to_edit.username
     to_edit.disable(Bot.DisabledReason.banned)
     to_edit.save()
-    bot.formatter.send_or_edit(
+    await context.bot.formatter.send_or_edit(
         update.effective_user.id,
         "Bot has been disabled and banned.",
         to_edit=util.mid_from_update(update)
@@ -264,7 +263,7 @@ def delete_bot(bot, update, to_edit: Bot):
     Statistic.of(update, 'disable', username, Statistic.IMPORTANT)
 
 
-def change_category(bot, update, to_edit, category):
+async def change_category(update, context, to_edit, category):
     uid = update.effective_user.id
     user = User.get(User.chat_id == uid)
 
@@ -273,15 +272,15 @@ def change_category(bot, update, to_edit, category):
         to_edit.category = category
         to_edit.save()
     else:
-        if check_suggestion_limit(bot, update, user):
+        if await check_suggestion_limit(update, context, user):
             return
         Suggestion.add_or_update(user, 'category', to_edit, category.id)
 
 
-def check_suggestion_limit(bot, update, user):
+async def check_suggestion_limit(update, context, user):
     cid = update.effective_chat.id
     if Suggestion.over_limit(user):
-        bot.formatter.send_failure(cid,
+        await context.bot.formatter.send_failure(cid,
                                    "You have reached the limit of {} suggestions. Please wait for "
                                    "the Moderators to approve of some of them.".format(
                                        settings.SUGGESTION_LIMIT))
@@ -290,7 +289,7 @@ def check_suggestion_limit(bot, update, user):
     return False
 
 
-def change_suggestion(bot, update, suggestion, page_handover):
+async def change_suggestion(update, context, suggestion, page_handover):
     cid = update.effective_chat.id
     mid = update.effective_message.message_id
 
@@ -326,22 +325,22 @@ def change_suggestion(bot, update, suggestion, page_handover):
     ]]
 
     reply_markup = InlineKeyboardMarkup(buttons)
-    bot.formatter.send_or_edit(cid, text, to_edit=mid, disable_web_page_preview=True,
+    await context.bot.formatter.send_or_edit(cid, text, to_edit=mid, disable_web_page_preview=True,
                                reply_markup=reply_markup)
 
 
-def remove_keyword(bot, update, chat_data, context):
+async def remove_keyword(update, context, kw_context):
     user = User.from_telegram_object(update.effective_user)
-    if check_suggestion_limit(bot, update, user):
+    if await check_suggestion_limit(update, context, user):
         return
-    to_edit = context.get('to_edit')
-    kw = context.get('keyword')
+    to_edit = kw_context.get('to_edit')
+    kw = kw_context.get('keyword')
     Suggestion.add_or_update(user=user, action='remove_keyword', subject=to_edit, value=kw.name)
-    return set_keywords(bot, update, chat_data, to_edit)
+    return await set_keywords(update, context, to_edit)
 
 
 @restricted
-def accept_suggestion(bot, update, suggestion: Suggestion):
+async def accept_suggestion(update, context, suggestion: Suggestion):
     user = User.from_telegram_object(update.effective_user)
     suggestion.apply()
 
@@ -354,7 +353,7 @@ def accept_suggestion(bot, update, suggestion: Suggestion):
 
     suggestion_text = suggestion_text[0].upper() + suggestion_text[1:]
     suggestion_text += '\nApproved by ' + user.markdown_short
-    bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, suggestion_text,
+    await context.bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, suggestion_text,
                      parse_mode='markdown', disable_web_page_preview=True)
 
     if user != suggestion.user.chat_id:
@@ -362,9 +361,9 @@ def accept_suggestion(bot, update, suggestion: Suggestion):
                                   '\n\n{}'.format(util.escape_markdown(suggestion.user.first_name),
                                                   str(suggestion))
         try:
-            bot.send_message(suggestion.user.chat_id, submittant_notification,
+            await context.bot.send_message(suggestion.user.chat_id, submittant_notification,
                              parse_mode='markdown', disable_web_page_preview=True)
         except BadRequest:
-            update.effective_message.reply_text(
+            await update.effective_message.reply_text(
                 "Could not contact {}.".format(suggestion.user.markdown_short),
                 parse_mode='markdown', disable_web_page_preview=True)

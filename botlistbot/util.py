@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -6,7 +7,6 @@ import traceback
 from collections import OrderedDict
 from functools import partial
 from functools import wraps
-from pprint import pprint
 from typing import List
 
 from botlistbot import appglobals
@@ -14,7 +14,7 @@ from botlistbot import const
 from botlistbot import settings
 from botlistbot.custemoji import Emoji
 from telegram import ChatAction
-from telegram import ParseMode
+from telegram.constants import ParseMode
 from telegram import TelegramError, ReplyKeyboardRemove
 from telegram.error import BadRequest
 
@@ -33,7 +33,7 @@ def track_groups(func):
     """
 
     @wraps(func)
-    def wrapped(bot, update, *args, **kwargs):
+    async def wrapped(update, context, *args, **kwargs):
         try:
             if update.effective_chat.type == 'group':
                 Group.from_telegram_object(update.effective_chat)
@@ -43,48 +43,48 @@ def track_groups(func):
                     Group.from_telegram_object(update.callback_query.message.chat)
             except (NameError, AttributeError):
                 logging.error("No chat_id available in update for track_groups.")
-        return func(bot, update, *args, **kwargs)
+        return await func(update, context, *args, **kwargs)
 
     return wrapped
 
 
 def restricted(func=None, strict=False, silent=False):
     if func is None:
-        # If called without method, we've been called with optional arguments.
-        # We return a decorator with the optional arguments filled in.
         return partial(restricted, strict=strict, silent=silent)
 
     @wraps(func)
-    def wrapped(bot, update, *args, **kwargs):
+    async def wrapped(update, context, *args, **kwargs):
         chat_id = update.effective_user.id
 
         if chat_id not in settings.MODERATORS:
             try:
                 print("Unauthorized access denied for {}.".format(chat_id))
                 if not silent:
-                    bot.sendPhoto(chat_id, open(appglobals.ROOT_DIR + '/assets/img/go_away_noob.png', 'rb'),
-                                  caption="Moderator Area. Unauthorized.")
+                    await context.bot.send_photo(
+                        chat_id,
+                        open(appglobals.ROOT_DIR + '/assets/img/go_away_noob.png', 'rb'),
+                        caption="Moderator Area. Unauthorized.",
+                    )
                 return
             except (TelegramError, AttributeError):
                 return
 
         if strict and chat_id not in settings.ADMINS:
             if not silent:
-                bot.sendMessage(chat_id, "This function is restricted to the channel creator.")
+                await context.bot.send_message(chat_id, "This function is restricted to the channel creator.")
             return
 
-        return func(bot, update, *args, **kwargs)
+        return await func(update, context, *args, **kwargs)
 
     return wrapped
 
 
 def private_chat_only(func):
     @wraps(func)
-    def wrapped(bot, update, *args, **kwargs):
+    async def wrapped(update, context, *args, **kwargs):
         if update.effective_chat.type == 'private':
-            return func(bot, update, *args, **kwargs)
+            return await func(update, context, *args, **kwargs)
         else:
-            # not private
             pass
 
     return wrapped
@@ -128,29 +128,11 @@ def uid_from_update(update):
     return update.effective_user.id
 
 
-# def deep_link_action_url(action: object, params: Dict = None) -> object:
-#     callback_data = {'a': action}
-#     if params:
-#         for key, value in params.items():
-#             callback_data[key] = value
-#     # s = urllib.parse.urlencode(callback_data)
-#     s = callback_str_from_dict(callback_data)
-#     print(s)
-#     return s
-
-
 def encode_base64(query):
     return re.sub(r'[^a-zA-Z0-9+/]', '', query)
 
 
 def callback_for_action(action, params=None):
-    """
-    Generates an uglified JSON representation to use in ``callback_data`` of ``InlineKeyboardButton``.
-    :param action: The identifier for your action.
-    :param params: A dict of additional parameters.
-    :return:
-    """
-
     if params is None:
         params = dict()
 
@@ -234,10 +216,10 @@ def callback_str_from_dict(d):
     return dumped
 
 
-def wait(bot, update, t=1.5):
+async def wait(update, context, t=1.5):
     chat_id = uid_from_update(update)
-    bot.sendChatAction(chat_id, ChatAction.TYPING)
-    time.sleep(t)
+    await context.bot.send_chat_action(chat_id, ChatAction.TYPING)
+    await asyncio.sleep(t)
 
 
 def order_dict_lexi(d):
@@ -254,13 +236,15 @@ def private_or_else_group_message(bot, chat_id, text):
     pass
 
 
-def send_or_edit_md_message(bot, chat_id, text, to_edit=None, **kwargs):
+async def send_or_edit_md_message(bot, chat_id, text, to_edit=None, **kwargs):
     try:
         if to_edit:
-            return bot.edit_message_text(text, chat_id=chat_id, message_id=to_edit, parse_mode=ParseMode.MARKDOWN,
-                                         **kwargs)
+            return await bot.edit_message_text(
+                text, chat_id=chat_id, message_id=to_edit, parse_mode=ParseMode.MARKDOWN,
+                **kwargs,
+            )
 
-        return send_md_message(bot, chat_id, text=text, **kwargs)
+        return await send_md_message(bot, chat_id, text=text, **kwargs)
     except BadRequest as e:
         if 'not modified' in e.message.lower():
             logging.debug('Message not modified.')
@@ -269,37 +253,43 @@ def send_or_edit_md_message(bot, chat_id, text, to_edit=None, **kwargs):
             traceback.print_exc()
 
 
-def send_md_message(bot, chat_id, text: str, **kwargs):
+async def send_md_message(bot, chat_id, text: str, **kwargs):
     if 'disable_web_page_preview' not in kwargs:
         kwargs['disable_web_page_preview'] = True
-    return bot.sendMessage(chat_id, text, parse_mode=ParseMode.MARKDOWN, **kwargs)
+    return await bot.send_message(chat_id, text, parse_mode=ParseMode.MARKDOWN, **kwargs)
 
 
-def send_message_success(bot, chat_id, text: str, add_punctuation=True, reply_markup=None, **kwargs):
+async def send_message_success(bot, chat_id, text: str, add_punctuation=True, reply_markup=None, **kwargs):
     if add_punctuation:
         if text[-1] != '.':
             text += '.'
 
     if not reply_markup:
         reply_markup = ReplyKeyboardRemove()
-    return bot.sendMessage(chat_id, success(text), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True,
-                           reply_markup=reply_markup,
-                           **kwargs)
+    return await bot.send_message(
+        chat_id, success(text), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True,
+        reply_markup=reply_markup,
+        **kwargs,
+    )
 
 
-def send_message_failure(bot, chat_id, text: str, **kwargs):
+async def send_message_failure(bot, chat_id, text: str, **kwargs):
     text = str.strip(text)
     if text[-1] != '.':
         text += '.'
-    return bot.sendMessage(chat_id, failure(text), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True,
-                           **kwargs)
+    return await bot.send_message(
+        chat_id, failure(text), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True,
+        **kwargs,
+    )
 
 
-def send_action_hint(bot, chat_id, text: str, **kwargs):
+async def send_action_hint(bot, chat_id, text: str, **kwargs):
     if text[-1] == '.':
         text = text[0:-1]
-    return bot.sendMessage(chat_id, action_hint(text), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True,
-                           **kwargs)
+    return await bot.send_message(
+        chat_id, action_hint(text), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True,
+        **kwargs,
+    )
 
 
 def success(text):
@@ -311,4 +301,4 @@ def failure(text):
 
 
 def action_hint(text):
-    return '💬 {}'.format(text)
+    return '\U0001f4ac {}'.format(text)

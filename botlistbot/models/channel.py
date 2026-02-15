@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-# -*- coding: utf-8 -*-
 from peewee import *
 
 from botlistbot.models.basemodel import BaseModel

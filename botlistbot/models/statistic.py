@@ -1,7 +1,7 @@
-# -*- coding: utf-8 -*-
 import datetime
 
 import logging
+from functools import wraps
 from peewee import *
 from telegram import Update
 
@@ -13,8 +13,9 @@ from botlistbot.models.basemodel import BaseModel
 
 def track_activity(action: str, entity: str = None, level: int = logging.INFO):
     def decorator(func):
-        def wrapped(bot, update, *args, **kwargs):
-            result = func(bot, update, *args, **kwargs)
+        @wraps(func)
+        async def wrapped(update, context, *args, **kwargs):
+            result = await func(update, context, *args, **kwargs)
             Statistic.of(update, action, entity, level)
             return result
 
@@ -62,11 +63,11 @@ class Statistic(BaseModel):
     level = SmallIntegerField(default=logging.INFO)
 
     EMOJIS = {
-        IMPORTANT: '🔴',
-        WARN: '🔺',
-        INFO: '⚪️',
-        ANALYSIS: '▫️',
-        DETAILED: '▪️'
+        IMPORTANT: '\U0001f534',
+        WARN: '\U0001f53a',
+        INFO: '\u26aa\ufe0f',
+        ANALYSIS: '\u25ab\ufe0f',
+        DETAILED: '\u25aa\ufe0f'
     }
 
     @staticmethod
@@ -91,9 +92,6 @@ class Statistic(BaseModel):
 
     @classmethod
     def of(cls, issuer, action: str, entity: str = None, level=logging.INFO):
-        # if action not in Statistic.ACTIONS.keys():
-        #     raise ValueError('"{}" is not a valid action. Refer to Statistic.ACTIONS for available keys.')
-
         if isinstance(issuer, User):
             user = issuer
         elif isinstance(issuer, Update):

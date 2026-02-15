@@ -21,29 +21,29 @@ from typing import *
 log = logging.getLogger()
 
 
-def show_official(bot, update):
+async def show_official(update, context):
     text = "*Official Telegram Bots:*\n\n"
-    update.effective_message.reply_text(
+    await update.effective_message.reply_text(
         text + Bot.get_official_bots_markdown(), parse_mode="markdown"
     )
 
 
 @track_activity("explore", "bots", Statistic.ANALYSIS)
-def explore(bot, update, chat_data):
+async def explore(update, context):
     cid = update.effective_chat.id
     uid = update.effective_user.id
     mid = util.mid_from_update(update)
     explorable_bots = Bot.explorable_bots()
 
-    chat_data["explored"] = chat_data.get("explored", list())
+    context.chat_data["explored"] = context.chat_data.get("explored", list())
 
     # don't explore twice
-    for explored in chat_data["explored"]:
+    for explored in context.chat_data["explored"]:
         explorable_bots.remove(explored)
 
     if len(explorable_bots) == 0:
-        util.send_md_message(
-            bot,
+        await util.send_md_message(
+            context.bot,
             cid,
             mdformat.none_action(
                 "You have explored all the bots. Congratulations, you might be the first 😜"
@@ -80,12 +80,8 @@ def explore(bot, update, chat_data):
     if uid in settings.MODERATORS and util.is_private_message(update):
         text += "\n\n🛃 /edit{}".format(random_bot.id)
 
-    msg = bot.formatter.send_or_edit(cid, text, to_edit=mid, reply_markup=markup)
-    chat_data["explored"].append(random_bot)
-
-    # import time
-    # time.sleep(2)
-    # msg.edit_reply_markup(reply_markup=ForceReply(selective=True))
+    msg = await context.bot.formatter.send_or_edit(cid, text, to_edit=mid, reply_markup=markup)
+    context.chat_data["explored"].append(random_bot)
 
 
 def random_explore_text():
@@ -111,7 +107,7 @@ def _select_category_buttons(callback_action=None):
     buttons = util.build_menu(
         [
             InlineKeyboardButton(
-                "{}{}".format(emoji.emojize(c.emojis, use_aliases=True), c.name),
+                "{}{}".format(emoji.emojize(c.emojis, language='alias'), c.name),
                 callback_data=util.callback_for_action(callback_action, {"id": c.id}),
             )
             for c in categories
@@ -134,13 +130,13 @@ def _select_category_buttons(callback_action=None):
 
 @track_activity("menu", "select category", Statistic.ANALYSIS)
 @track_groups
-def select_category(bot, update, chat_data, callback_action=None):
+async def select_category(update, context, callback_action=None):
     chat_id = update.effective_chat.id
     reply_markup = InlineKeyboardMarkup(_select_category_buttons(callback_action))
     reply_markup, callback = botlistchat.append_restricted_delete_button(
-        update, chat_data, reply_markup
+        update, context.chat_data, reply_markup
     )
-    msg = bot.formatter.send_or_edit(
+    msg = await context.bot.formatter.send_or_edit(
         chat_id,
         util.action_hint(messages.SELECT_CATEGORY),
         to_edit=util.mid_from_update(update),
@@ -151,7 +147,7 @@ def select_category(bot, update, chat_data, callback_action=None):
 
 
 @track_activity("explore", "new bots", Statistic.ANALYSIS)
-def show_new_bots(bot, update, chat_data, back_button=False):
+async def show_new_bots(update, context, back_button=False):
     chat_id = update.effective_chat.id
     channel = helpers.get_channel()
 
@@ -187,9 +183,9 @@ def show_new_bots(bot, update, chat_data, back_button=False):
         )
     reply_markup = InlineKeyboardMarkup(buttons)
     reply_markup, callback = botlistchat.append_restricted_delete_button(
-        update, chat_data, reply_markup
+        update, context.chat_data, reply_markup
     )
-    msg = bot.formatter.send_or_edit(
+    msg = await context.bot.formatter.send_or_edit(
         chat_id,
         _new_bots_text(),
         to_edit=util.mid_from_update(update),
@@ -200,7 +196,7 @@ def show_new_bots(bot, update, chat_data, back_button=False):
     return ConversationHandler.END
 
 
-def send_category(bot, update, chat_data, category):
+async def send_category(update, context, category):
     uid = util.uid_from_update(update)
     cid = update.effective_chat.id
     bots = Bot.of_category_without_new(category)[: settings.MAX_BOTS_PER_MESSAGE]
@@ -253,9 +249,9 @@ def send_category(bot, update, chat_data, category):
 
     reply_markup = InlineKeyboardMarkup(menu)
     reply_markup, callback = botlistchat.append_restricted_delete_button(
-        update, chat_data, reply_markup
+        update, context.chat_data, reply_markup
     )
-    msg = bot.formatter.send_or_edit(
+    msg = await context.bot.formatter.send_or_edit(
         cid, txt, to_edit=util.mid_from_update(update), reply_markup=reply_markup
     )
     callback(msg)
@@ -264,8 +260,8 @@ def send_category(bot, update, chat_data, category):
     )
 
 
-def send_bot_details(
-    bot, update, chat_data, item=None, header_msg: Optional[str] = None
+async def send_bot_details(
+    update, context, item=None, header_msg: Optional[str] = None
 ):
     is_group = util.is_group_message(update)
     cid = update.effective_chat.id
@@ -281,7 +277,7 @@ def send_bot_details(
             item = Bot.by_username(bot_in_text, include_disabled=True)
 
         except Bot.DoesNotExist:
-            update.message.reply_text(
+            await update.message.reply_text(
                 util.failure(
                     "This bot is not in the @BotList. If you think this is a "
                     "mistake, see the /examples for /contributing."
@@ -366,22 +362,10 @@ def send_bot_details(
         reply_markup = None
 
     reply_markup, callback = botlistchat.append_restricted_delete_button(
-        update, chat_data, reply_markup
+        update, context.chat_data, reply_markup
     )
 
-    # Should we ever decide to show thumbnails *shrug*
-    # if os.path.exists(item.thumbnail_file):
-    #     preview = True
-    #     photo = '[\xad]({})'.format('{}/thumbnail/{}.jpeg'.format(
-    #         settings.API_URL,
-    #         item.username[1:]
-    #     ))
-    #     log.info(photo)
-    #     txt = photo + txt
-    # else:
-    #     preview = False
-
-    msg = bot.formatter.send_or_edit(
+    msg = await context.bot.formatter.send_or_edit(
         cid, txt, to_edit=util.mid_from_update(update), reply_markup=reply_markup
     )
     callback(msg)

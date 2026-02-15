@@ -2,32 +2,21 @@
 from collections import Counter
 
 import asyncio
-import asyncpool
 import filecmp
 import logging
 import os
 import re
 import shutil
-import threading
 import time
 import traceback
 from datetime import datetime, timedelta
 from logzero import logger as log
 
-# Modern Pyrogram (v2+) uses pyrogram.raw instead of pyrogram.api
-try:
-    from pyrogram.raw.functions.contacts import ResolveUsername as Search
-    from pyrogram.raw.functions.messages import DeleteHistory
-    from pyrogram.raw.functions.users import GetUsers
-    from pyrogram.raw.types import InputPeerUser
-    from pyrogram.raw.types.contacts import ResolvedPeer
-except ImportError:
-    # Fallback for older Pyrogram versions
-    from pyrogram.api.functions.contacts import search as Search
-    from pyrogram.api.functions.messages import DeleteHistory
-    from pyrogram.api.functions.users import GetUsers
-    from pyrogram.api.types import InputPeerUser
-    from pyrogram.api.types.contacts import ResolvedPeer
+from pyrogram.raw.functions.contacts import ResolveUsername as Search
+from pyrogram.raw.functions.messages import DeleteHistory
+from pyrogram.raw.functions.users import GetUsers
+from pyrogram.raw.types import InputPeerUser
+from pyrogram.raw.types.contacts import ResolvedPeer
 
 from pyrogram.errors import (
     FloodWait,
@@ -37,6 +26,7 @@ from pyrogram.errors import (
     UsernameNotOccupied,
 )
 from telegram import Bot as TelegramBot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.error import BadRequest
 
 try:
@@ -69,30 +59,6 @@ if os.path.exists(TMP_DIR):
 os.makedirs(TMP_DIR)
 
 
-# class Stats:
-#     def __init__(self, filepath):
-#         _counter_file = Path(filepath).expanduser()
-#         os.makedirs(_counter_file.parent, exist_ok=True)
-#         _counter_file.touch()
-#
-#         self.store = shelve.open(str(_counter_file), writeback=True)
-#
-#         self.store.setdefault("sent_messages", 0)
-#         self.store.setdefault("tracking_start", datetime.now())
-#
-#     def incr_count(self):
-#         sent_messages = self.store["sent_messages"]
-#         if sent_messages > 8000:
-#             raise StopBotchecker
-#         self.store["sent_messages"] = sent_messages + 1
-#
-#
-# class StopBotchecker(Exception):
-#     """ Raised when botcheckerworker is over limit """
-#
-#
-# stats = Stats('~/.run/botlistbot/botcheckerworker-stats.json')
-
 def zero_width_encoding(encoded_string):
     if not encoded_string:
         return None
@@ -109,9 +75,8 @@ _BaseClass = InteractionClientAsync if InteractionClientAsync is not None else o
 
 
 class BotChecker(_BaseClass):
-    def __init__(self, event_loop, session_name, api_id, api_hash, phone_number, workdir=None):
+    def __init__(self, session_name, api_id, api_hash, phone_number, workdir=None):
 
-        self.event_loop = event_loop
         self.username_flood_until = None
         self._message_intervals = {}
         self._last_ping = None
@@ -134,16 +99,6 @@ class BotChecker(_BaseClass):
         await asyncio.sleep(delay)
         self.send(DeleteHistory(await self.resolve_peer(peer), max_id=999999999, just_clear=True))
         log.debug("Deleted conversation with {}".format(peer))
-
-    # def delete_all_conversations(self):
-    #     all_peers = [utils.resolve_id(x[0]) for x in self.session.entities.get_input_list()]
-    #     for peer in all_peers:
-    #         log.debug("Deleting conversation with {}...".format(peer))
-    #         try:
-    #             input_entity = self.client.session.entities.get_input_entity(peer[0])
-    #             self.client(DeleteHistoryRequest(input_entity, max_id=9999999999999999))
-    #         except:
-    #             log.error("Couldn't find {}".format(peer[0]))
 
     def update_bot_details(self, to_check: BotModel, peer):
         """
@@ -179,17 +134,6 @@ class BotChecker(_BaseClass):
         # In any case
         to_check.chat_id = int(user.id)
         to_check.username = '@' + str(user.username)
-
-    # def send_message(self, *args, **kwargs):
-    #     timeout_between_sends = 0.5
-    #     if self._last_ping:
-    #         diff = timeout_between_sends - (time.time() - self._last_ping)
-    #         if diff > 0:
-    #             time.sleep(diff)
-    #
-    #     result = super(BotChecker, self).send_message(*args, **kwargs)
-    #     self._last_ping = time.time()
-    #     return result
 
     async def get_ping_response(
             self,
@@ -284,7 +228,7 @@ class BotChecker(_BaseClass):
 
 
 async def check_bot(
-        bot,
+        telegram_bot,
         bot_checker: BotChecker,
         to_check: BotModel,
         result_queue: asyncio.Queue
@@ -303,9 +247,9 @@ async def check_bot(
         text = "{} does not exist (anymore). Please resolve this " \
                "issue manually!".format(to_check.username)
         try:
-            bot.send_message(settings.BLSF_ID, text, reply_markup=markup)
+            await telegram_bot.send_message(settings.BLSF_ID, text, reply_markup=markup)
         except BadRequest:
-            bot.send_notification(text)
+            await telegram_bot.send_notification(text)
         return await result_queue.put('not found')
 
     if not peer:
@@ -339,39 +283,39 @@ async def check_bot(
         to_check.last_response = now
 
     if was_offline != is_offline:
-        bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, '{} went {}.'.format(
+        await telegram_bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, '{} went {}.'.format(
             to_check.str_no_md,
             'offline' if to_check.offline else 'online'
         ), timeout=40)
 
-    await add_keywords(bot, response, to_check)
+    await add_keywords(telegram_bot, response, to_check)
 
     # Download profile picture
     if settings.DOWNLOAD_PROFILE_PICTURES:
-        await download_profile_picture(bot, bot_checker, to_check)
+        await download_profile_picture(telegram_bot, bot_checker, to_check)
 
     to_check.save()
 
     if settings.DELETE_CONVERSATION_AFTER_PING:
         await bot_checker.schedule_conversation_deletion(to_check.chat_id, 10)
 
-    await disable_decider(bot, to_check)
+    await disable_decider(telegram_bot, to_check)
 
     await result_queue.put('offline' if to_check.offline else 'online')
 
 
-async def download_profile_picture(bot, bot_checker, to_check):
+async def download_profile_picture(telegram_bot, bot_checker, to_check):
     photo_file = to_check.thumbnail_file
     sticker_file = os.path.join(settings.BOT_THUMBNAIL_DIR, '_sticker_tmp.webp')
     await bot_checker.download_profile_photo(to_check, photo_file)
     if settings.NOTIFY_NEW_PROFILE_PICTURE:
         make_sticker(photo_file, sticker_file)
-        bot.send_notification("New profile picture of {}:".format(to_check.username))
-        bot.send_sticker(settings.BOTLIST_NOTIFICATIONS_ID,
+        await telegram_bot.send_notification("New profile picture of {}:".format(to_check.username))
+        await telegram_bot.send_sticker(settings.BOTLIST_NOTIFICATIONS_ID,
                          open(photo_file, 'rb'), timeout=360)
 
 
-async def add_keywords(bot, response, to_check):
+async def add_keywords(telegram_bot, response, to_check):
     if not isinstance(response, Response) or response.empty:
         return
 
@@ -394,7 +338,7 @@ async def add_keywords(bot, response, to_check):
             's' if len(to_add) > 1 else '',
             ', '.join(['#' + k for k in to_add]),
             to_check.str_no_md)
-        bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, msg, timeout=40)
+        await telegram_bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, msg, timeout=40)
         log.info(msg)
 
 
@@ -408,39 +352,32 @@ async def result_reader(queue) -> Counter:
     return stats
 
 
-async def run(telegram_bot, bot_checker, bots, stop_event: threading.Event = None) -> Counter:
+async def run(telegram_bot, bot_checker, bots, stop_event=None) -> Counter:
     result_queue = asyncio.Queue()
-    loop = bot_checker.event_loop
-    reader_future = asyncio.ensure_future(result_reader(result_queue), loop=loop)
+    reader_future = asyncio.ensure_future(result_reader(result_queue))
 
-    # TODO: check correct order of bots concerning pings etc.
+    semaphore = asyncio.Semaphore(settings.BOTCHECKER_CONCURRENT_COUNT)
 
-    async with asyncpool.AsyncPool(
-            loop,
-            num_workers=settings.BOTCHECKER_CONCURRENT_COUNT,
-            name="BotChecker",
-            logger=log,
-            worker_co=check_bot,
-            max_task_time=300,
-            log_every_n=settings.BOTCHECKER_CONCURRENT_COUNT,
-            expected_total=len(bots),
-    ) as pool:
-        for to_check in bots:
-            # TODO: implement properly
-            if stop_event and stop_event.is_set():
-                print('JOINING')
-                pool.join()
-            else:
-                await pool.push(telegram_bot, bot_checker, to_check, result_queue)
+    async def _worker(to_check_bot):
+        async with semaphore:
+            await check_bot(telegram_bot, bot_checker, to_check_bot, result_queue)
+
+    tasks = []
+    for to_check in bots:
+        if stop_event and stop_event.is_set():
+            break
+        tasks.append(asyncio.ensure_future(_worker(to_check)))
+
+    await asyncio.gather(*tasks, return_exceptions=True)
 
     await result_queue.put(None)
     return await reader_future
 
 
-def ping_bots_job(bot, job):
-    bot_checker: BotChecker = job.context.get('checker')
-    stop_event: threading.Event = job.context.get('stop')
-    loop = bot_checker.event_loop
+async def ping_bots_job(context):
+    bot = context.bot
+    bot_checker: BotChecker = context.job.data.get('checker')
+    stop_event = context.job.data.get('stop')
 
     all_bots = BotModel.select(BotModel).where(
         (BotModel.approved == True)
@@ -452,20 +389,20 @@ def ping_bots_job(bot, job):
     )
 
     start = time.time()
-    result = loop.run_until_complete(run(bot, bot_checker, all_bots, stop_event))  # type: Counter
+    result = await run(bot, bot_checker, all_bots, stop_event)  # type: Counter
     end = time.time()
 
     if not result:
-        msg = "👎 BotChecker encountered problems."
+        msg = "BotChecker encountered problems."
     else:
-        msg = "ℹ️ BotChecker completed in {}s:\n".format(round(end - start))
+        msg = "BotChecker completed in {}s:\n".format(round(end - start))
         for k, v in result.items():
-            msg += "\n● {} {}".format(v, k)
-    bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, msg)
+            msg += "\n- {} {}".format(v, k)
+    await bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, msg)
     log.info(msg)
 
 
-async def disable_decider(bot: TelegramBot, to_check: BotModel):
+async def disable_decider(telegram_bot: TelegramBot, to_check: BotModel):
     assert to_check.disabled_reason != BotModel.DisabledReason.banned
 
     if (
@@ -482,10 +419,10 @@ async def disable_decider(bot: TelegramBot, to_check: BotModel):
             else:
                 reason = "it's been offline for.. like... ever"
 
-            msg = "❌ {} disabled as {}.".format(to_check, reason)
+            msg = "{} disabled as {}.".format(to_check, reason)
             log.info(msg)
-            bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, msg, timeout=30,
-                             parse_mode='markdown')
+            await telegram_bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, msg, timeout=30,
+                             parse_mode=ParseMode.MARKDOWN)
         else:
             log.info("huhwtf")
     elif (
@@ -497,7 +434,7 @@ async def disable_decider(bot: TelegramBot, to_check: BotModel):
             to_check.save()
             msg = "{} was included in the @BotList again as it came back online.".format(to_check)
             log.info(msg)
-            bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, msg, timeout=30,
-                             parse_mode='markdown')
+            await telegram_bot.send_message(settings.BOTLIST_NOTIFICATIONS_ID, msg, timeout=30,
+                             parse_mode=ParseMode.MARKDOWN)
         else:
             log.info("huhwtf")

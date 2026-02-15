@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
 from peewee import *
 from telegram import Chat
 from botlistbot.models.basemodel import BaseModel
 
 
 class Group(BaseModel):
-    id = PrimaryKeyField()
+    id = AutoField()
     chat_id = BigIntegerField(unique=True)
     title = CharField()
 

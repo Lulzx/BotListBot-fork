@@ -1,13 +1,11 @@
-import time
+import asyncio
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
     ReplyMarkup,
-    ParseMode,
 )
-from telegram.ext import JobQueue
-from telegram.ext.dispatcher import run_async
+from telegram.constants import ParseMode
 
 from botlistbot import captions
 from botlistbot import settings
@@ -136,46 +134,44 @@ def append_free_delete_button(update, reply_markup) -> Optional[ReplyMarkup]:
 
 
 @track_activity("issued deletion of conversation in BotListChat")
-def delete_conversation(bot, update, chat_data):
+async def delete_conversation(update, context):
     cid = update.effective_chat.id
     uid = update.effective_user.id
     mid = util.mid_from_update(update)
 
-    deletions_pending = chat_data.get("deletions_pending", dict())
-    context: Optional[dict] = deletions_pending.get(mid)
+    deletions_pending = context.chat_data.get("deletions_pending", dict())
+    ctx: Optional[dict] = deletions_pending.get(mid)
 
-    if context and uid != context.get("user_id"):
+    if ctx and uid != ctx.get("user_id"):
         if uid not in settings.MODERATORS:
-            bot.answerCallbackQuery(
+            await context.bot.answer_callback_query(
                 update.callback_query.id, text="✋️ You didn't prompt this message."
             )
             return
 
-    bot.delete_message(cid, mid, safe=True)
-    bot.delete_message(cid, context["command_id"], safe=True)
+    await context.bot.delete_message(cid, mid)
+    await context.bot.delete_message(cid, ctx["command_id"])
 
 
 BROADCAST_REPLACEMENTS = {"categories": "📚 ᴄᴀᴛɢᴏʀɪᴇs", "bots": "🤖 *bots*", "- ": "👉 "}
 
 
-@run_async
-def _delete_multiple_delayed(bot, chat_id, immediately=None, delayed=None):
+async def _delete_multiple_delayed(context_bot, chat_id, immediately=None, delayed=None):
     if immediately is None:
         immediately = []
     if delayed is None:
         delayed = []
 
     for mid in immediately:
-        bot.delete_message(chat_id, mid)
+        await context_bot.delete_message(chat_id, mid)
 
-    time.sleep(1.5)
+    await asyncio.sleep(1.5)
 
     for mid in delayed:
-        bot.delete_message(chat_id, mid)
+        await context_bot.delete_message(chat_id, mid)
 
 
-@run_async
-def show_available_hints(bot, update):
+async def show_available_hints(update, context):
     message = "In @BotListChat, you can use the following hashtag hints to guide new members:\n\n"
     parts = []
     for k, v in HINTS.items():
@@ -185,7 +181,7 @@ def show_available_hints(bot, update):
     message += "\n".join(parts)
 
     message += "\n\nMake sure to reply to another message, so the person knows they're being referred to."
-    update.effective_message.reply_text(
+    await update.effective_message.reply_text(
         message, parse_mode="markdown", disable_web_page_preview=True
     )
 
@@ -214,8 +210,7 @@ def get_hint_data(text):
     return None, None, None
 
 
-@run_async
-def hint_handler(bot, update, job_queue: JobQueue):
+async def hint_handler(update, context):
     chat_id = update.message.chat_id
     if not util.is_group_message(update):
         return
@@ -224,58 +219,39 @@ def hint_handler(bot, update, job_queue: JobQueue):
     user = User.from_update(update)
     msg, reply_markup, hashtag = get_hint_data(text)
 
-    def _send_hint(hint_text):
+    async def _send_hint(hint_text):
         if hint_text is None:
             return
         if reply_to:
             hint_text = f"{user.markdown_short} hints: {hint_text}"
 
-        bot.formatter.send_message(
+        await context.bot.formatter.send_message(
             chat_id,
             hint_text,
             reply_markup=reply_markup,
             reply_to_message_id=reply_to.message_id if reply_to else None,
         )
-        update.effective_message.delete()
+        await update.effective_message.delete()
 
     should_reply: bool = HINTS.get(hashtag)["should_reply"]
     if should_reply and not reply_to:
         del_markup = append_free_delete_button(update, InlineKeyboardMarkup([[]]))
-        _send_hint(msg)
-        ntfc_msg = update.effective_message.reply_text(
+        await _send_hint(msg)
+        ntfc_msg = await update.effective_message.reply_text(
             f"Hey {user.markdown_short}, next time reply to someone 🙃",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=del_markup,
             quote=False,
             disable_web_page_preview=True,
         )
-        job_queue.run_once(lambda *_: ntfc_msg.delete(), 7, name="delete notification")
+        context.job_queue.run_once(lambda *_: ntfc_msg.delete(), 7, name="delete notification")
     else:
-        _send_hint(msg)
+        await _send_hint(msg)
 
 
-@run_async
-def notify_group_submission_accepted(bot, job, accepted_bot):
-    # accepted_bot = Bot.get(id=accepted_bot.id)
-    # log.info("Notifying group about new accepted bot {}".format(accepted_bot.username))
-    # # check if the bot still exists
-    #
-    # text = "*Welcome* {} *to the BotList!*\n🏆 This submission by {} is " \
-    #        "their {} contribution.".format(
-    #     str(accepted_bot),
-    #     str(accepted_bot.submitted_by),
-    #     accepted_bot.submitted_by.contributions_ordinal,
-    # )
-    # util.send_md_message(bot, settings.BOTLISTCHAT_ID, text,
-    #                      reply_markup=basic.thank_you_markup(0), disable_web_page_preview=True)
-
+async def notify_group_submission_accepted(update, context, accepted_bot):
     pass  # upon @T3CHNO's request :((((
 
 
-def text_message_logger(bot, update, logger):
+async def text_message_logger(update, context, logger):
     pass
-    # cid = update.effective_chat.id
-    # if cid != settings.BOTLISTCHAT_ID:
-    #     return
-    # text = "{}: {}".format(update.effective_user.first_name, update.message.text)
-    # logger.info(text)

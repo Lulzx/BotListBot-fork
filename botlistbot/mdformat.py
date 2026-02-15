@@ -38,7 +38,7 @@ if __name__ == '__main__':
 def results_list(args, prefix=''):
     # TODO make this method recursive
     result = '```'
-    memo = emoji.emojize(':memo:', use_aliases=True)
+    memo = emoji.emojize(':memo:', language='alias')
     if isinstance(args, dict):
         for value in args.values():
             if isinstance(value, list):

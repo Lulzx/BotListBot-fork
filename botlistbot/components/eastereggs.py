@@ -2,7 +2,6 @@ import random
 from pprint import pprint
 
 from peewee import fn
-from telegram.ext import JobQueue
 
 from botlistbot.components import botlistchat
 from botlistbot.models import Bot
@@ -116,12 +115,12 @@ def _crapPy_Tr0ll_kbmarkup(rows=None):
 
 
 @track_activity("easteregg", '"crappy troll markup"')
-def send_next(bot, update, job_queue: JobQueue, args=None):
+async def send_next(update, context):
     uid = util.uid_from_update(update)
     num_rows = None
-    if args:
+    if context.args:
         try:
-            num_rows = int(args[0])
+            num_rows = int(context.args[0])
         except:
             num_rows = None
 
@@ -129,19 +128,19 @@ def send_next(bot, update, job_queue: JobQueue, args=None):
         _crapPy_Tr0ll_kbmarkup(num_rows), one_time_keyboard=False, per_user=True
     )
     text = "ɹoʇɐɹǝuǝb ǝɯɐuɹǝsn ɯɐɹbǝןǝʇ"
-    util.send_md_message(bot, uid, text, reply_markup=reply_markup)
+    await util.send_md_message(context.bot, uid, text, reply_markup=reply_markup)
 
     if util.is_group_message(update):
-        del_msg = bot.formatter.send_message(
+        del_msg = await context.bot.formatter.send_message(
             update.effective_chat.id, "Have fun in private ;)\n/easteregg"
         )
-        update.effective_message.delete()
-        job_queue.run_once(
+        await update.effective_message.delete()
+        context.job_queue.run_once(
             lambda *_: del_msg.delete(safe=True), 4, name="delete easteregg hint"
         )
 
 
-def send_random_bot(bot, update):
+async def send_random_bot(update, context):
     from botlistbot.components.explore import send_bot_details
 
     random_bot = (
@@ -153,4 +152,4 @@ def send_random_bot(bot, update):
         .order_by(fn.Random())
         .limit(1)[0]
     )
-    send_bot_details(bot, update, random_bot)
+    await send_bot_details(update, context, random_bot)

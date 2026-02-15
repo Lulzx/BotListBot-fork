@@ -1,60 +1,38 @@
 import json
-import re
-
 import logging
-from pprint import pprint
 
-from future.utils import string_types
-
-from botlistbot.models import Bot
-from botlistbot.models import Category
 from telegram import Update
-from telegram.utils.deprecate import deprecate
-from telegram.ext.handler import Handler
+from telegram.ext import BaseHandler
 
 
-class JSONCallbackHandler(Handler):
+class JSONCallbackHandler(BaseHandler):
 
-    def __init__(self,
-                 action,
-                 callback,
-                 mapping=None,
-                 pass_update_queue=False,
-                 pass_job_queue=False,
-                 pass_groups=False,
-                 pass_groupdict=False,
-                 pass_user_data=False,
-                 pass_chat_data=False):
-        super(JSONCallbackHandler, self).__init__(
-            callback,
-            pass_update_queue=pass_update_queue,
-            pass_job_queue=pass_job_queue,
-            pass_user_data=pass_user_data,
-            pass_chat_data=pass_chat_data)
-
+    def __init__(self, action, callback, mapping=None):
+        super().__init__(callback)
         self.action = action
         self.mapping = mapping
-        self.pass_groups = pass_groups
-        self.pass_groupdict = pass_groupdict
         self.logger = logging.getLogger(__name__)
 
     def check_update(self, update):
         if isinstance(update, Update) and update.callback_query:
             if self.action:
-                obj = json.loads(str(update.callback_query.data))
+                try:
+                    obj = json.loads(str(update.callback_query.data))
+                except (json.JSONDecodeError, TypeError):
+                    return False
                 if 'a' in obj:
-                    action = obj['a']
-                    return action == self.action
+                    return obj['a'] == self.action
                 else:
                     self.logger.error("No action in update.")
+                    return False
             else:
                 return True
+        return False
 
-    def handle_update(self, update, dispatcher):
-        optional_args = self.collect_optional_args(dispatcher, update)
+    async def handle_update(self, update, application, check_result, context):
         obj = json.loads(str(update.callback_query.data))
 
-        # Add the ORM-objects to callback arguments
+        kwargs = {}
         if self.mapping is not None:
             for key, value in self.mapping.items():
                 db_wrapper = value[0]
@@ -62,10 +40,16 @@ class JSONCallbackHandler(Handler):
                 if key in obj:
                     try:
                         model_obj = db_wrapper.get(db_wrapper.id == obj[key])
-                        optional_args[method_name] = model_obj
+                        kwargs[method_name] = model_obj
                     except db_wrapper.DoesNotExist:
-                        self.logger.error("Field {} with id {} was not found in database.".format(key, obj[key]))
+                        self.logger.error(
+                            "Field {} with id {} was not found in database.".format(key, obj[key])
+                        )
                 else:
                     self.logger.error("Expected field {} was not supplied.".format(key))
 
-        return self.callback(dispatcher.bot, update, **optional_args)
+        # Store mapped objects on context for the callback to access
+        context.json_data = obj
+        context.mapped_objects = kwargs
+
+        return await self.callback(update, context)

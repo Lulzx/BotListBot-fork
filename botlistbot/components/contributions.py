@@ -1,14 +1,13 @@
-# -*- coding: utf-8 -*-
 import datetime
 import re
 from logzero import logger as log
 from peewee import fn
-from telegram import Message as TelegramMessage, ParseMode
-from telegram.ext import ConversationHandler, run_async
+from telegram import Message as TelegramMessage
+from telegram.constants import ParseMode
+from telegram.ext import ConversationHandler
 
 from botlistbot import settings
 from botlistbot import util
-from botlistbot.appglobals import loop
 from botlistbot.components.admin import notify_submittant_rejected, edit_bot
 from botlistbot.models import Bot, Country, Suggestion, User
 from botlistbot.models.revision import Revision
@@ -52,13 +51,13 @@ def extract_bot_mentions(message: TelegramMessage):
     return bot_usernames
 
 
-def notify_bot_offline(bot, update, args=None):
+async def notify_bot_offline(update, context):
     tg_user = update.message.from_user
     user = User.from_telegram_object(tg_user)
     reply_to = util.original_reply_id(update)
 
-    if args:
-        text = " ".join(args)
+    if context.args:
+        text = " ".join(context.args)
     else:
         text = update.message.text
         command_no_args = (
@@ -66,7 +65,7 @@ def notify_bot_offline(bot, update, args=None):
             or text.lower().strip() == "/offline@botlistbot"
         )
         if command_no_args:
-            update.message.reply_text(
+            await update.message.reply_text(
                 util.action_hint(
                     "Please use this command with an argument. For example:\n/offline @mybot"
                 ),
@@ -81,8 +80,8 @@ def notify_bot_offline(bot, update, args=None):
             log.info("Ignoring {}".format(text))
             return
     except AttributeError:
-        if args:
-            update.message.reply_text(
+        if context.args:
+            await update.message.reply_text(
                 util.failure("Sorry, but you didn't send me a bot `@username`."),
                 quote=True,
                 parse_mode=ParseMode.MARKDOWN,
@@ -108,29 +107,29 @@ def notify_bot_offline(bot, update, args=None):
                 subject=offline_bot,
             )
             suggestion.save()
-        update.message.reply_text(
+        await update.message.reply_text(
             util.success(
                 "Thank you! We will review your suggestion and set the bot offline."
             ),
             reply_to_message_id=reply_to,
         )
     except Bot.DoesNotExist:
-        update.message.reply_text(
+        await update.message.reply_text(
             util.action_hint("The bot you sent me is not in the @BotList."),
             reply_to_message_id=reply_to,
         )
     return ConversationHandler.END
 
 
-def notify_bot_spam(bot, update, args=None):
+async def notify_bot_spam(update, context):
     tg_user = update.message.from_user
     user = User.from_telegram_object(tg_user)
     if util.stop_banned(update, user):
         return
     reply_to = util.original_reply_id(update)
 
-    if args:
-        text = " ".join(args)
+    if context.args:
+        text = " ".join(context.args)
     else:
         text = update.message.text
         command_no_args = (
@@ -138,7 +137,7 @@ def notify_bot_spam(bot, update, args=None):
             or text.lower().strip() == "/spam@botlistbot"
         )
         if command_no_args:
-            update.message.reply_text(
+            await update.message.reply_text(
                 util.action_hint(
                     "Please use this command with an argument. For example:\n/spam @mybot"
                 ),
@@ -153,8 +152,8 @@ def notify_bot_spam(bot, update, args=None):
             log.info("Ignoring {}".format(text))
             return
     except AttributeError:
-        if args:
-            update.message.reply_text(
+        if context.args:
+            await update.message.reply_text(
                 util.failure("Sorry, but you didn't send me a bot `@username`."),
                 quote=True,
                 parse_mode=ParseMode.MARKDOWN,
@@ -177,14 +176,14 @@ def notify_bot_spam(bot, update, args=None):
                 user=user, action="spam", date=datetime.date.today(), subject=spam_bot
             )
             suggestion.save()
-        update.message.reply_text(
+        await update.message.reply_text(
             util.success(
                 "Thank you! We will review your suggestion and mark the bot as spammy."
             ),
             reply_to_message_id=reply_to,
         )
     except Bot.DoesNotExist:
-        update.message.reply_text(
+        await update.message.reply_text(
             util.action_hint("The bot you sent me is not in the @BotList."),
             reply_to_message_id=reply_to,
         )
@@ -192,15 +191,15 @@ def notify_bot_spam(bot, update, args=None):
 
 
 @track_groups
-def new_bot_submission(bot, update, chat_data, args=None, bot_checker=None):
+async def new_bot_submission(update, context, bot_checker=None):
     tg_user = update.message.from_user
     user = User.from_telegram_object(tg_user)
     if util.stop_banned(update, user):
         return
     reply_to = util.original_reply_id(update)
 
-    if args:
-        text = " ".join(args)
+    if context.args:
+        text = " ".join(context.args)
     else:
         text = update.message.text
         command_no_args = (
@@ -208,7 +207,7 @@ def new_bot_submission(bot, update, chat_data, args=None, bot_checker=None):
             or text.lower().strip() == "/new@botlistbot"
         )
         if command_no_args:
-            update.message.reply_text(
+            await update.message.reply_text(
                 util.action_hint(
                     "Please use this command with an argument. For example:\n/new @mybot 🔎"
                 ),
@@ -223,8 +222,8 @@ def new_bot_submission(bot, update, chat_data, args=None, bot_checker=None):
             log.info("Ignoring {}".format(text))
             return
     except AttributeError:
-        if args:
-            update.message.reply_text(
+        if context.args:
+            await update.message.reply_text(
                 util.failure("Sorry, but you didn't send me a bot `@username`."),
                 quote=True,
                 parse_mode=ParseMode.MARKDOWN,
@@ -237,14 +236,14 @@ def new_bot_submission(bot, update, chat_data, args=None, bot_checker=None):
     try:
         new_bot = Bot.by_username(username, include_disabled=True)
         if new_bot.disabled:
-            update.message.reply_text(
+            await update.message.reply_text(
                 util.failure(
                     "{} is banned from the @BotList.".format(new_bot.username)
                 ),
                 reply_to_message_id=reply_to,
             )
         elif new_bot.approved:
-            update.message.reply_text(
+            await update.message.reply_text(
                 util.action_hint(
                     "Sorry fool, but {} is already in the @BotList 😉".format(
                         new_bot.username
@@ -253,7 +252,7 @@ def new_bot_submission(bot, update, chat_data, args=None, bot_checker=None):
                 reply_to_message_id=reply_to,
             )
         else:
-            update.message.reply_text(
+            await update.message.reply_text(
                 util.action_hint(
                     "{} has already been submitted. Please have patience...".format(
                         new_bot.username
@@ -296,9 +295,9 @@ def new_bot_submission(bot, update, chat_data, args=None, bot_checker=None):
     ):
         from botlistbot.components.explore import send_bot_details
 
-        send_bot_details(bot, update, chat_data, new_bot)
+        await send_bot_details(update, context, new_bot)
     else:
-        update.message.reply_text(
+        await update.message.reply_text(
             util.success(
                 "You submitted {} for approval.{}".format(new_bot, description_notify)
             ),
@@ -307,24 +306,22 @@ def new_bot_submission(bot, update, chat_data, args=None, bot_checker=None):
         )
 
         # Ask the user to fill in the bot details
-        util.send_md_message(
-            bot,
+        await util.send_md_message(
+            context.bot,
             update.effective_user.id,
             "Congratulations, you just submitted a bot to the @BotList. Please help us fill in the details below:",
         )
-        edit_bot(bot, update, chat_data, to_edit=new_bot)
+        await edit_bot(update, context, to_edit=new_bot)
 
     try:
-        check_submission(bot, bot_checker, new_bot)
+        await check_submission(context, bot_checker, new_bot)
     except Exception as e:
         log.exception(e)
 
     return ConversationHandler.END
 
 
-@run_async
-def check_submission(bot, bot_checker: "BotChecker", to_check: Bot):
-    # TODO: make this method async
+async def check_submission(context, bot_checker: "BotChecker", to_check: Bot):
     if bot_checker is None:
         return
 
@@ -332,22 +329,22 @@ def check_submission(bot, bot_checker: "BotChecker", to_check: Bot):
 
     log.debug("Checking bot {}...".format(to_check.username))
 
-    def reject(reason):
+    async def reject(reason):
         to_check.delete_instance()
-        msg = notify_submittant_rejected(
-            bot,
+        msg = await notify_submittant_rejected(
+            context.bot,
             botlistbot_user,
             notify_submittant=True,
             reason=reason,
             to_reject=to_check,
         )
-        bot.formatter.send_message(settings.BOTLIST_NOTIFICATIONS_ID, msg)
+        await context.bot.formatter.send_message(settings.BOTLIST_NOTIFICATIONS_ID, msg)
 
     try:
         peer = bot_checker.resolve_bot(to_check)
     except UsernameNotOccupied:
         to_check.delete_instance()
-        reject(
+        await reject(
             "The entity you submitted either does not exist or is not a Telegram bot."
         )
         return
@@ -355,7 +352,7 @@ def check_submission(bot, bot_checker: "BotChecker", to_check: Bot):
     bot_checker.update_bot_details(to_check, peer)
 
     if to_check.userbot:
-        reject(
+        await reject(
             "You submitted the name of a Telegram user, not one of a bot. If you're trying to "
             "submit a userbot, please contact the BLSF directly ("
             "@BotListChat)."
@@ -363,16 +360,14 @@ def check_submission(bot, bot_checker: "BotChecker", to_check: Bot):
         return
 
     # Check online state
-    response = loop.run_until_complete(
-        bot_checker.get_ping_response(
-            to_check, timeout=18, try_inline=to_check.inlinequeries
-        )
+    response = await bot_checker.get_ping_response(
+        to_check, timeout=18, try_inline=to_check.inlinequeries
     )
 
     is_offline = not bool(response)
 
     if is_offline:
-        reject(
+        await reject(
             "The bot you sent seems to be offline, unfortunately. Feel free to submit it again "
             "when it's back up 😙"
         )
@@ -382,12 +377,11 @@ def check_submission(bot, bot_checker: "BotChecker", to_check: Bot):
     to_check.last_ping = now
     to_check.last_response = now
 
-    loop.run_until_complete(add_keywords(bot, response, to_check))
+    await add_keywords(context.bot, response, to_check)
 
     # Download profile picture
     if settings.DOWNLOAD_PROFILE_PICTURES:
-        # TODO: does this work asynchronously?
-        loop.run_until_complete(download_profile_picture(bot, bot_checker, to_check))
+        await download_profile_picture(context.bot, bot_checker, to_check)
 
     to_check.save()
     log.info(f"{to_check} was evaluated and looks good for approval.")

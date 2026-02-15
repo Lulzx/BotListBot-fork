@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import datetime
 from pathlib import Path
 
@@ -15,7 +14,7 @@ from telegram import (
     ReplyKeyboardMarkup,
     TelegramError,
 )
-from telegram.ext import ConversationHandler, DispatcherHandlerStop, Job, run_async
+from telegram.ext import ConversationHandler
 from typing import Dict
 
 from botlistbot import appglobals
@@ -34,10 +33,9 @@ from botlistbot.models import Bot, Category, Revision, Statistic, Suggestion, Us
 from botlistbot.util import restricted
 
 
-@run_async
 @track_activity("menu", "Administration", Statistic.ANALYSIS)
 @restricted
-def menu(bot, update):
+async def menu(update, context):
     uid = update.effective_user.id
 
     is_admin = uid in settings.ADMINS
@@ -46,7 +44,7 @@ def menu(bot, update):
     txt = "🛃 Administration menu. Current revision: {}".format(
         Revision.get_instance().nr
     )
-    bot.formatter.send_message(
+    await context.bot.formatter.send_message(
         uid, txt, reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
     )
     return BotStates.ADMIN_MENU
@@ -106,16 +104,16 @@ def _admin_buttons(send_botlist_button=False, logs_button=False):
 
 
 @restricted
-def _input_failed(bot, update, chat_data, text):
+async def _input_failed(update, context, text):
     chat_id = util.uid_from_update(update)
-    bot.formatter.send_failure(chat_id, text)
+    await context.bot.formatter.send_failure(chat_id, text)
     Statistic.of(
         update,
         "error",
         "input failed in admin menu for {}".format(text),
         Statistic.ANALYSIS,
     )
-    chat_data["add_bot_message"] = None
+    context.chat_data["add_bot_message"] = None
 
 
 def _add_bot_to_chatdata(chat_data, category=None):
@@ -274,7 +272,7 @@ def _edit_bot_buttons(to_edit: Bot, pending_suggestions: Dict, is_moderator):
 
 
 @track_activity("menu", "bot editing", Statistic.ANALYSIS)
-def edit_bot(bot, update, chat_data, to_edit=None):
+async def edit_bot(update, context, to_edit=None):
     uid = util.uid_from_update(update)
     message_id = util.mid_from_update(update)
     user = User.from_update(update)
@@ -293,14 +291,14 @@ def edit_bot(bot, update, chat_data, to_edit=None):
             try:
                 to_edit = Bot.get(id=b_id)
             except Bot.DoesNotExist:
-                update.message.reply_text(util.failure("No bot exists with this id."))
+                await update.message.reply_text(util.failure("No bot exists with this id."))
                 return
         else:
-            bot.formatter.send_failure(uid, "An unexpected error occured.")
+            await context.bot.formatter.send_failure(uid, "An unexpected error occured.")
             return
 
     # if not to_edit.approved:
-    #     return approve_bots(bot, update, override_list=[to_edit])
+    #     return approve_bots(update, context, override_list=[to_edit])
 
     pending_suggestions = Suggestion.pending_for_bot(to_edit, user)
     reply_markup = InlineKeyboardMarkup(
@@ -323,7 +321,7 @@ def edit_bot(bot, update, chat_data, to_edit=None):
             to_edit.approved_by,
         )
     )
-    bot.formatter.send_or_edit(
+    await context.bot.formatter.send_or_edit(
         uid,
         "🛃 Edit {}{}{}".format(
             to_edit.detail_text,
@@ -336,9 +334,9 @@ def edit_bot(bot, update, chat_data, to_edit=None):
 
 
 @restricted(strict=True)
-def prepare_transmission(bot, update, chat_data):
+async def prepare_transmission(update, context):
     chat_id = util.uid_from_update(update)
-    pending_update(bot, update)
+    await pending_update(update, context)
     text = mdformat.action_hint("Notify subscribers about this update?")
     reply_markup = InlineKeyboardMarkup(
         [
@@ -371,12 +369,12 @@ def prepare_transmission(bot, update, chat_data):
     # text = "Temporarily disabled"
     # reply_markup = None
 
-    util.send_md_message(bot, chat_id, text, reply_markup=reply_markup)
+    await util.send_md_message(context.bot, chat_id, text, reply_markup=reply_markup)
 
 
 @track_activity("menu", "approve suggestions", Statistic.ANALYSIS)
 @restricted
-def approve_suggestions(bot, update, page=0):
+async def approve_suggestions(update, context, page=0):
     uid = util.uid_from_update(update)
     suggestions = Suggestion.select_all()
     if page * settings.PAGE_SIZE_SUGGESTIONS_LIST >= len(suggestions):
@@ -391,7 +389,7 @@ def approve_suggestions(bot, update, page=0):
     suggestions = suggestions[start:end]
 
     if len(suggestions) == 0:
-        bot.formatter.send_or_edit(
+        await context.bot.formatter.send_or_edit(
             uid, "No more suggestions available.", to_edit=util.mid_from_update(update)
         )
         return
@@ -458,7 +456,7 @@ def approve_suggestions(bot, update, page=0):
 
     reply_markup = InlineKeyboardMarkup(buttons)
 
-    bot.formatter.send_or_edit(
+    await context.bot.formatter.send_or_edit(
         uid,
         util.action_hint(text),
         reply_markup=reply_markup,
@@ -470,7 +468,7 @@ def approve_suggestions(bot, update, page=0):
 
 @track_activity("menu", "approve bots", Statistic.ANALYSIS)
 @restricted
-def approve_bots(bot, update, page=0, override_list=None):
+async def approve_bots(update, context, page=0, override_list=None):
     chat_id = util.uid_from_update(update)
 
     if override_list:
@@ -498,7 +496,7 @@ def approve_bots(bot, update, page=0, override_list=None):
     unapproved = unapproved[start:end]
 
     if len(unapproved) == 0:
-        bot.formatter.send_or_edit(
+        await context.bot.formatter.send_or_edit(
             chat_id,
             "No more unapproved bots available. "
             "Good job! (Is this the first time? 😂)",
@@ -598,7 +596,7 @@ def approve_bots(bot, update, page=0, override_list=None):
         if len(unapproved) == 1
         else messages.SELECT_BOT_TO_ACCEPT
     )
-    bot.formatter.send_or_edit(
+    await context.bot.formatter.send_or_edit(
         chat_id,
         util.action_hint(text),
         reply_markup=reply_markup,
@@ -608,7 +606,7 @@ def approve_bots(bot, update, page=0, override_list=None):
 
 
 @track_activity("menu", "recommend moderator", Statistic.DETAILED)
-def recommend_moderator(bot, update, bot_in_question, page):
+async def recommend_moderator(update, context, bot_in_question, page):
     uid = update.effective_user.id
     mid = util.mid_from_update(update)
     moderators = User.select().where(
@@ -639,10 +637,10 @@ def recommend_moderator(bot, update, bot_in_question, page):
             str(bot_in_question)
         )
     )
-    bot.formatter.send_or_edit(uid, text, to_edit=mid, reply_markup=reply_markup)
+    await context.bot.formatter.send_or_edit(uid, text, to_edit=mid, reply_markup=reply_markup)
 
 
-def share_with_moderator(bot, update, bot_in_question, moderator):
+async def share_with_moderator(update, context, bot_in_question, moderator):
     user = User.from_update(update)
 
     buttons = [
@@ -660,8 +658,8 @@ def share_with_moderator(bot, update, bot_in_question, moderator):
         user.markdown_short, bot_in_question
     )
     try:
-        util.send_md_message(
-            bot,
+        await util.send_md_message(
+            context.bot,
             moderator.chat_id,
             text,
             reply_markup=reply_markup,
@@ -676,7 +674,7 @@ def share_with_moderator(bot, update, bot_in_question, moderator):
         answer_text = mdformat.failure(f"Could not contact {moderator.plaintext}: {e}")
 
     if update.callback_query:
-        update.callback_query.answer(text=answer_text)
+        await update.callback_query.answer(text=answer_text)
 
     Statistic.of(
         update,
@@ -686,7 +684,7 @@ def share_with_moderator(bot, update, bot_in_question, moderator):
 
 
 @track_activity("menu", "edit bot category", Statistic.DETAILED)
-def edit_bot_category(bot, update, for_bot, callback_action=None):
+async def edit_bot_category(update, context, for_bot, callback_action=None):
     if callback_action is None:
         callback_action = CallbackActions.EDIT_BOT_CAT_SELECTED
     uid = util.uid_from_update(update)
@@ -695,7 +693,7 @@ def edit_bot_category(bot, update, for_bot, callback_action=None):
     buttons = util.build_menu(
         [
             InlineKeyboardButton(
-                "{}{}".format(emoji.emojize(c.emojis, use_aliases=True), c.name),
+                "{}{}".format(emoji.emojize(c.emojis, language='alias'), c.name),
                 callback_data=util.callback_for_action(
                     callback_action, {"cid": c.id, "bid": for_bot.id}
                 ),
@@ -704,7 +702,7 @@ def edit_bot_category(bot, update, for_bot, callback_action=None):
         ],
         2,
     )
-    return bot.formatter.send_or_edit(
+    return await context.bot.formatter.send_or_edit(
         uid,
         util.action_hint(
             "Please select a category" + (" for {}".format(for_bot) if for_bot else "")
@@ -715,7 +713,7 @@ def edit_bot_category(bot, update, for_bot, callback_action=None):
 
 
 @restricted
-def accept_bot_submission(bot, update, of_bot: Bot, category):
+async def accept_bot_submission(update, context, of_bot: Bot, category):
     uid = util.uid_from_update(update)
     message_id = util.mid_from_update(update)
     user = User.from_update(update)
@@ -739,7 +737,7 @@ def accept_bot_submission(bot, update, of_bot: Bot, category):
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
 
-        bot.formatter.send_or_edit(
+        await context.bot.formatter.send_or_edit(
             uid,
             "{} has been accepted to the Botlist. ".format(
                 of_bot
@@ -753,7 +751,7 @@ def accept_bot_submission(bot, update, of_bot: Bot, category):
         # notify submittant
         if of_bot.submitted_by != user:
             try:
-                bot.sendMessage(
+                await context.bot.send_message(
                     of_bot.submitted_by.chat_id,
                     util.success(
                         messages.ACCEPTANCE_PRIVATE_MESSAGE.format(
@@ -769,11 +767,11 @@ def accept_bot_submission(bot, update, of_bot: Bot, category):
 
         log.info(log_msg)
     except:
-        bot.formatter.send_failure(uid, "An error has occured. Bot not added.")
+        await context.bot.formatter.send_failure(uid, "An error has occured. Bot not added.")
 
 
 @track_activity("request", "list of offline bots")
-def send_offline(bot, update):
+async def send_offline(update, context):
     chat_id = util.uid_from_update(update)
     offline = (
         Bot.select()
@@ -799,14 +797,13 @@ def send_offline(bot, update):
         )
     else:
         text = "No bots are offline."
-    bot.formatter.send_message(chat_id, text)
+    await context.bot.formatter.send_message(chat_id, text)
 
 
 @restricted
-def reject_bot_submission(
-    bot,
+async def reject_bot_submission(
     update,
-    args=None,
+    context,
     to_reject=None,
     verbose=True,
     notify_submittant=True,
@@ -817,23 +814,23 @@ def reject_bot_submission(
 
     if to_reject is None:
         if not update.message.reply_to_message:
-            bot.send_message(
+            await context.bot.send_message(
                 update.effective_user.id,
                 util.failure("You must reply to a message of mine."),
             )
             return
 
         text = update.message.reply_to_message.text
-        reason = reason if reason else (" ".join(args) if args else None)
+        reason = reason if reason else (" ".join(context.args) if context.args else None)
 
         try:
-            update.message.delete()
+            await update.message.delete()
         except:
             pass
 
         username = helpers.find_bots_in_text(text, first=True)
         if not username:
-            bot.send_message(
+            await context.bot.send_message(
                 update.effective_user.id,
                 util.failure("No username in the message that you replied to."),
             )
@@ -842,7 +839,7 @@ def reject_bot_submission(
         try:
             to_reject = Bot.by_username(username)
         except Bot.DoesNotExist:
-            bot.send_message(
+            await context.bot.send_message(
                 update.effective_user.id,
                 util.failure(
                     "Rejection failed: {} is not present in the "
@@ -855,27 +852,27 @@ def reject_bot_submission(
             msg = "{} has already been accepted, so it cannot be rejected anymore.".format(
                 username
             )
-            bot.sendMessage(uid, util.failure(msg))
+            await context.bot.send_message(uid, util.failure(msg))
             return
 
     Statistic.of(update, "reject", to_reject.username)
-    text = notify_submittant_rejected(bot, user, notify_submittant, reason, to_reject)
+    text = await notify_submittant_rejected(context.bot, user, notify_submittant, reason, to_reject)
     to_reject.delete_instance()
 
     if verbose:
-        bot.sendMessage(uid, text)
+        await context.bot.send_message(uid, text)
 
     if update.callback_query:
-        update.callback_query.answer(text=text)
+        await update.callback_query.answer(text=text)
 
 
-def notify_submittant_rejected(bot, admin_user, notify_submittant, reason, to_reject):
+async def notify_submittant_rejected(bot, admin_user, notify_submittant, reason, to_reject):
     notification_successful = False
     msg = "{} rejected by {}.".format(to_reject.username, admin_user)
     if notify_submittant or reason:
         try:
             if reason:
-                bot.send_message(
+                await bot.send_message(
                     to_reject.submitted_by.chat_id,
                     util.failure(
                         messages.REJECTION_WITH_REASON.format(
@@ -884,7 +881,7 @@ def notify_submittant_rejected(bot, admin_user, notify_submittant, reason, to_re
                     ),
                 )
             else:
-                bot.sendMessage(
+                await bot.send_message(
                     to_reject.submitted_by.chat_id,
                     util.failure(
                         messages.REJECTION_PRIVATE_MESSAGE.format(to_reject.username)
@@ -914,21 +911,21 @@ def notify_submittant_rejected(bot, admin_user, notify_submittant, reason, to_re
 
 
 @restricted
-def ban_handler(bot, update, args, chat_data, ban_state: bool):
-    if args:
-        query = " ".join(args) if isinstance(args, list) else args
+async def ban_handler(update, context, ban_state: bool):
+    if context.args:
+        query = " ".join(context.args) if isinstance(context.args, list) else context.args
 
         entity_to_ban = lookup_entity(query, exact=True)
 
         if isinstance(entity_to_ban, User):
-            ban_user(bot, update, entity_to_ban, ban_state)
+            await ban_user(update, context, entity_to_ban, ban_state)
         elif isinstance(entity_to_ban, Bot):
-            ban_bot(bot, update, chat_data, entity_to_ban, ban_state)
+            await ban_bot(update, context, entity_to_ban, ban_state)
         else:
-            update.message.reply_text(mdformat.failure("Can only ban users and bots."))
+            await update.message.reply_text(mdformat.failure("Can only ban users and bots."))
     else:
         # no search term
-        update.message.reply_text(
+        await update.message.reply_text(
             messages.BAN_MESSAGE if ban_state else messages.UNBAN_MESSAGE,
             reply_markup=ForceReply(selective=True),
         )
@@ -936,19 +933,19 @@ def ban_handler(bot, update, args, chat_data, ban_state: bool):
 
 
 @restricted
-def ban_user(_bot, update, user: User, ban_state: bool):
+async def ban_user(update, context, user: User, ban_state: bool):
     if user.banned and ban_state is True:
-        update.message.reply_text(
+        await update.message.reply_text(
             mdformat.none_action("User {} is already banned.".format(user)),
             parse_mode="markdown",
         )
-        raise DispatcherHandlerStop
+        return
     if not user.banned and ban_state is False:
-        update.message.reply_text(
+        await update.message.reply_text(
             mdformat.none_action("User {} is not banned.".format(user)),
             parse_mode="markdown",
         )
-        raise DispatcherHandlerStop
+        return
     user.banned = ban_state
     if ban_state is True:
         with db.atomic():
@@ -965,7 +962,7 @@ def ban_user(_bot, update, user: User, ban_state: bool):
             )
             for s in users_suggestions:
                 s.delete_instance()
-        update.message.reply_text(
+        await update.message.reply_text(
             mdformat.success(
                 "User {} banned, all bot submissions and suggestions removed.".format(
                     user
@@ -975,7 +972,7 @@ def ban_user(_bot, update, user: User, ban_state: bool):
         )
         Statistic.of(update, "ban", user.markdown_short)
     else:
-        update.message.reply_text(
+        await update.message.reply_text(
             mdformat.success("User {} unbanned.".format(user)), parse_mode="markdown"
         )
         Statistic.of(update, "unban", user.markdown_short)
@@ -983,15 +980,15 @@ def ban_user(_bot, update, user: User, ban_state: bool):
 
 
 @restricted
-def ban_bot(bot, update, chat_data, to_ban: Bot, ban_state: bool):
+async def ban_bot(update, context, to_ban: Bot, ban_state: bool):
     if to_ban.disabled and ban_state is True:
-        update.message.reply_text(
+        await update.message.reply_text(
             mdformat.none_action("{} is already banned.".format(to_ban)),
             parse_mode="markdown",
         )
         return
     if not to_ban.disabled and ban_state is False:
-        update.message.reply_text(
+        await update.message.reply_text(
             mdformat.none_action("{} is not banned.".format(to_ban)),
             parse_mode="markdown",
         )
@@ -999,19 +996,19 @@ def ban_bot(bot, update, chat_data, to_ban: Bot, ban_state: bool):
 
     if ban_state:
         to_ban.disable(Bot.DisabledReason.banned)
-        update.message.reply_text("Bot was banned.")
+        await update.message.reply_text("Bot was banned.")
     else:
         to_ban.enable()
-        update.message.reply_text("Bot was unbanned.")
+        await update.message.reply_text("Bot was unbanned.")
 
     to_ban.save()
 
     from botlistbot.components.explore import send_bot_details
 
-    return send_bot_details(bot, update, chat_data, to_ban)
+    return await send_bot_details(update, context, to_ban)
 
 
-def last_update_job(bot, job: Job):
+async def last_update_job(context):
     return  # make admins happy :)
     last_update = helpers.get_channel().last_update
     if last_update:
@@ -1022,7 +1019,7 @@ def last_update_job(bot, job: Job):
         if difference > delta:
             for admin in settings.ADMINS:
                 try:
-                    bot.sendMessage(
+                    await context.bot.send_message(
                         admin,
                         f"Last @BotList update was {difference.days} days ago. "
                         f"UPDATE NOW YOU CARNT! /admin",
@@ -1032,7 +1029,7 @@ def last_update_job(bot, job: Job):
 
 
 @restricted
-def apply_all_changes(bot, update, chat_data, to_edit):
+async def apply_all_changes(update, context, to_edit):
     user = User.from_update(update)
 
     user_suggestions = Suggestion.select_all_of_user(user)
@@ -1040,17 +1037,17 @@ def apply_all_changes(bot, update, chat_data, to_edit):
         suggestion.apply()
 
     refreshed_bot = Bot.get(id=to_edit.id)
-    edit_bot(bot, update, chat_data, refreshed_bot)
+    await edit_bot(update, context, refreshed_bot)
     Statistic.of(update, "apply", refreshed_bot.username)
 
 
 @track_activity("menu", "pending bots for next update", Statistic.ANALYSIS)
-def pending_update(bot, update):
+async def pending_update(update, context):
     uid = update.effective_chat.id
     bots = Bot.select_pending_update()
 
     if len(bots) == 0:
-        update.message.reply_text("No bots pending for update.")
+        await update.message.reply_text("No bots pending for update.")
         return
 
     txt = "Bots pending for next Update:\n\n"
@@ -1061,29 +1058,29 @@ def pending_update(bot, update):
     else:
         txt += "\n".join([str(b) for b in bots])
 
-    bot.formatter.send_message(uid, txt)
+    await context.bot.formatter.send_message(uid, txt)
 
 
 @track_activity("request", "runtime files", Statistic.ANALYSIS)
 @restricted
-def send_runtime_files(bot, update):
-    def send_file(path: Path):
+async def send_runtime_files(update, context):
+    async def send_file(path: Path):
         path = str(path)
         try:
             uid = update.effective_user.id
-            bot.sendDocument(uid, open(path, "rb"), filename=os.path.split(path)[-1])
+            await context.bot.send_document(uid, open(path, "rb"), filename=os.path.split(path)[-1])
         except:
             pass
 
     root = Path(appglobals.ROOT_DIR) / "botlistbot"
 
-    send_file(root / "files/intro_en.txt")
-    send_file(root / "files/intro_es.txt")
-    send_file(root / "files/new_bots_list.txt")
-    send_file(root / "files/category_list.txt")
-    send_file(root / "files/commands.txt")
-    send_file(root / "error.log")
-    send_file(root / "debug.log")
+    await send_file(root / "files/intro_en.txt")
+    await send_file(root / "files/intro_es.txt")
+    await send_file(root / "files/new_bots_list.txt")
+    await send_file(root / "files/category_list.txt")
+    await send_file(root / "files/commands.txt")
+    await send_file(root / "error.log")
+    await send_file(root / "debug.log")
 
 
 # def _merge_statistic_logs(statistic, file, level):
@@ -1108,11 +1105,11 @@ def send_runtime_files(bot, update):
 
 @track_activity("request", "activity logs", Statistic.ANALYSIS)
 @restricted
-def send_activity_logs(bot, update, args=None, level=Statistic.INFO):
+async def send_activity_logs(update, context, level=Statistic.INFO):
     num = 200
-    if args:
+    if context.args:
         try:
-            num = int(args[0])
+            num = int(context.args[0])
             num = min(num, 500)
         except:
             pass
@@ -1125,11 +1122,11 @@ def send_activity_logs(bot, update, args=None, level=Statistic.INFO):
         items = recent_statistic[i : i + step_size]
         text = "\n".join(x.md_str() for x in items)
 
-        bot.formatter.send_message(uid, text)
+        await context.bot.formatter.send_message(uid, text)
 
 
 @restricted
-def send_statistic(bot, update):
+async def send_statistic(update, context):
     interesting_actions = [
         "explore",
         "menu",
@@ -1148,16 +1145,16 @@ def send_statistic(bot, update):
         "`{}▪️` {} {}".format(str(s.count).ljust(maxlen), s.action.title(), s.entity)
         for s in stats
     )
-    bot.formatter.send_message(update.effective_chat.id, text, parse_mode="markdown")
+    await context.bot.formatter.send_message(update.effective_chat.id, text, parse_mode="markdown")
 
 
 @track_activity("menu", "short approve list", Statistic.ANALYSIS)
-def short_approve_list(bot, update):
+async def short_approve_list(update, context):
     uid = update.effective_chat.id
     bots = Bot.select_unapproved()
 
     if len(bots) == 0:
-        update.message.reply_text("No bots to be approved.")
+        await update.message.reply_text("No bots to be approved.")
         return
 
     txt = "Bots pending approval:\n\n"
@@ -1168,12 +1165,12 @@ def short_approve_list(bot, update):
     else:
         txt += "\n".join([str(b) for b in bots])
 
-    bot.formatter.send_message(uid, txt)
+    await context.bot.formatter.send_message(uid, txt)
 
 
 @track_activity("menu", "manybots", Statistic.ANALYSIS)
 @restricted
-def manybots(bot, update):
+async def manybots(update, context):
     uid = update.effective_chat.id
     bots = Bot.select().where(
         Bot.approved == True & Bot.botbuilder == True & Bot.disabled == False
@@ -1187,4 +1184,4 @@ def manybots(bot, update):
     # else:
     txt += "\n".join([str(b) for b in bots])
 
-    bot.formatter.send_message(uid, txt)
+    await context.bot.formatter.send_message(uid, txt)

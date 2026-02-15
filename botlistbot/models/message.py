@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from peewee import *
 
 from botlistbot.models import Bot
@@ -6,7 +5,7 @@ from botlistbot.models.basemodel import BaseModel
 
 
 class Message(BaseModel):
-    message_id = PrimaryKeyField()
+    message_id = AutoField()
     chat_id = BigIntegerField(unique=True)
     command = CharField(choices=['offline', 'spam', 'new'])
     entity = ForeignKeyField(Bot)

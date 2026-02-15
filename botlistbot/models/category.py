@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import emoji
 from peewee import *
 
@@ -8,7 +7,7 @@ from botlistbot.models.basemodel import BaseModel
 
 
 class Category(BaseModel):
-    id = PrimaryKeyField()
+    id = AutoField()
     order = IntegerField(unique=True)
     emojis = CharField()
     name = CharField(unique=True)
@@ -30,5 +29,5 @@ class Category(BaseModel):
         }
 
     def __str__(self):
-        return '•' + emoji.emojize(self.emojis, use_aliases=True) + self.name + \
+        return '•' + emoji.emojize(self.emojis, language='alias') + self.name + \
                (' - ' + self.extra if self.extra else '')

@@ -20,10 +20,8 @@ from telegram import (
 from telegram.ext import (
     CommandHandler,
     ConversationHandler,
-    Filters,
     MessageHandler,
-    RegexHandler,
-    JobQueue,
+    filters,
 )
 
 from botlistbot import appglobals
@@ -46,40 +44,40 @@ log = logging.getLogger(__name__)
 
 @track_activity("command", "start")
 @track_groups
-def start(bot, update, chat_data, args):
+async def start(update, context):
     tg_user = update.message.from_user
     chat_id = tg_user.id
 
     # Get or create the user from/in database
     User.from_telegram_object(tg_user)
 
-    if isinstance(args, list) and len(args) > 0:
+    if isinstance(context.args, list) and len(context.args) > 0:
         # CATEGORY BY ID
         try:
-            cat = Category.get(Category.id == args[0])
+            cat = Category.get(Category.id == context.args[0])
             from botlistbot.components.explore import send_category
 
-            return send_category(bot, update, chat_data, cat)
+            return await send_category(update, context, cat)
         except (ValueError, Category.DoesNotExist):
             pass
 
-        query = " ".join(args).lower()
+        query = " ".join(context.args).lower()
 
         # SPECIFIC DEEP-LINKED QUERIES
         if query == const.DeepLinkingActions.CONTRIBUTING:
-            return help.contributing(bot, update, quote=False)
+            return await help.contributing(update, context, quote=False)
         elif query == const.DeepLinkingActions.EXAMPLES:
-            return help.examples(bot, update, quote=False)
+            return await help.examples(update, context, quote=False)
         elif query == const.DeepLinkingActions.RULES:
-            return help.rules(bot, update, quote=False)
+            return await help.rules(update, context, quote=False)
         elif query == const.DeepLinkingActions.SEARCH:
-            return search_handler(bot, update, chat_data)
+            return await search_handler(update, context)
 
         # SEARCH QUERY
-        search_query(bot, update, chat_data, query)
+        await search_query(update, context, query)
 
     else:
-        bot.sendSticker(
+        await context.bot.send_sticker(
             chat_id,
             open(
                 os.path.join(
@@ -88,10 +86,10 @@ def start(bot, update, chat_data, args):
                 "rb",
             ),
         )
-        help.help(bot, update)
-        util.wait(bot, update)
+        await help.help(update, context)
+        await util.wait(update, context)
         if util.is_private_message(update):
-            main_menu(bot, update)
+            await main_menu(update, context)
         return ConversationHandler.END
 
 
@@ -111,7 +109,7 @@ def main_menu_buttons(admin=False):
 
 
 @track_activity("menu", "main menu", Statistic.ANALYSIS)
-def main_menu(bot, update):
+async def main_menu(update, context):
     chat_id = update.effective_chat.id
     is_admin = chat_id in settings.MODERATORS
     reply_markup = (
@@ -122,7 +120,7 @@ def main_menu(bot, update):
         else ReplyKeyboardRemove()
     )
 
-    bot.sendMessage(
+    await context.bot.send_message(
         chat_id,
         mdformat.action_hint("What would you like to do?"),
         reply_markup=reply_markup,
@@ -130,32 +128,32 @@ def main_menu(bot, update):
 
 
 @util.restricted
-def restart(bot, update):
+async def restart(update, context):
     chat_id = util.uid_from_update(update)
     os.kill(os.getpid(), signal.SIGINT)
-    bot.formatter.send_success(chat_id, "Bot is restarting...")
+    await context.bot.formatter.send_success(chat_id, "Bot is restarting...")
     time.sleep(0.3)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
 
-def error(bot, update, error):
-    log.error(error)
+async def error(update, context):
+    log.error(context.error)
 
 
 @track_activity("remove", "keyboard")
-def remove_keyboard(bot, update):
-    update.message.reply_text("Keyboard removed.", reply_markup=ReplyKeyboardRemove())
+async def remove_keyboard(update, context):
+    await update.message.reply_text("Keyboard removed.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
 
-def delete_botlistchat_promotions(bot, update, chat_data, update_queue):
+async def delete_botlistchat_promotions(update, context):
     """
     TODO: don't think we need this anymore, it never worked. Nice idea, but no way to achieve it...
     """
     return
     cid = update.effective_chat.id
 
-    if chat_data.get("delete_promotion_retries") >= 3:
+    if context.chat_data.get("delete_promotion_retries") >= 3:
         return
 
     if messages.PROMOTION_MESSAGE not in update.effective_message.text_markdown:
@@ -164,23 +162,22 @@ def delete_botlistchat_promotions(bot, update, chat_data, update_queue):
     if update.effective_chat.id != settings.BOTLISTCHAT_ID:
         return
 
-    sent_inlinequery = chat_data.get("sent_inlinequery")
+    sent_inlinequery = context.chat_data.get("sent_inlinequery")
     if sent_inlinequery:
         text = sent_inlinequery.text
         text = text.replace(messages.PROMOTION_MESSAGE, "")
-        bot.edit_message_text(text, cid, sent_inlinequery)
-        del chat_data["sent_inlinequery"]
+        await context.bot.edit_message_text(text, cid, sent_inlinequery)
+        del context.chat_data["sent_inlinequery"]
     else:
-        chat_data["delete_promotion_retries"] += 1
+        context.chat_data["delete_promotion_retries"] += 1
         time.sleep(2)  # TODO
-        update_queue.put(update)
 
 
-def plaintext_group(bot, update, chat_data, update_queue):
+async def plaintext_group(update, context):
     # Handle channel posts (e.g. from @BotList channel) to sync bot data
     if update.channel_post:
         try:
-            return new_channel_post(bot, update)
+            return await new_channel_post(update, context)
         except Exception as e:
             log.error(f"Error processing channel post: {e}")
             return
@@ -190,7 +187,7 @@ def plaintext_group(bot, update, chat_data, update_queue):
         return
 
 
-def cancel(bot, update):
+async def cancel(update, context):
     return ConversationHandler.END
 
 
@@ -206,52 +203,50 @@ def thank_you_markup(count=0):
     return InlineKeyboardMarkup([[button]])
 
 
-def count_thank_you(bot, update, count=0):
+async def count_thank_you(update, context, count=0):
     assert isinstance(count, int)
-    update.effective_message.edit_reply_markup(reply_markup=thank_you_markup(count))
+    await update.effective_message.edit_reply_markup(reply_markup=thank_you_markup(count))
 
 
-def add_thank_you_button(bot, update, cid, mid):
-    bot.edit_message_reply_markup(cid, mid, reply_markup=thank_you_markup(0))
+async def add_thank_you_button(update, context, cid, mid):
+    await context.bot.edit_message_reply_markup(cid, mid, reply_markup=thank_you_markup(0))
 
 
-def ping(_, update: Update, job_queue: JobQueue):
+async def ping(update, context):
     msg: Message = update.effective_message
-    sent = msg.reply_text("🏓 Pong!", quote=True)
+    sent = await msg.reply_text("🏓 Pong!", quote=True)
     del_timeout = 4
 
-    def delete_msgs(*_):
-        sent.delete()
+    async def delete_msgs(ctx):
+        await sent.delete()
         try:
-            msg.delete()
+            await msg.delete()
         except:
             pass
 
-    job_queue.run_once(delete_msgs, del_timeout, name="delete ping pong messages")
+    context.job_queue.run_once(delete_msgs, del_timeout, name="delete ping pong messages")
 
 
 @track_groups
-def all_handler(bot, update, chat_data):
+async def all_handler(update, context):
     if update.message and update.message.new_chat_members:
         if int(settings.SELF_BOT_ID) in [x.id for x in update.message.new_chat_members]:
             # bot was added to a group
-            start(bot, update, chat_data, None)
+            await start(update, context)
     return ConversationHandler.END
 
 
 def register(dp):
-    dp.add_handler(CommandHandler("start", start, pass_args=True, pass_chat_data=True))
+    dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("menu", main_menu))
-    dp.add_handler(RegexHandler(captions.EXIT, main_menu))
+    dp.add_handler(MessageHandler(filters.Regex(captions.EXIT), main_menu))
     dp.add_handler(CommandHandler("r", restart))
     dp.add_error_handler(error)
     dp.add_handler(
         MessageHandler(
-            Filters.text,
+            filters.TEXT,
             plaintext_group,
-            pass_chat_data=True,
-            pass_update_queue=True,
         )
     )
     dp.add_handler(CommandHandler("removekeyboard", remove_keyboard))
-    dp.add_handler(CommandHandler("ping", ping, pass_job_queue=True))
+    dp.add_handler(CommandHandler("ping", ping))

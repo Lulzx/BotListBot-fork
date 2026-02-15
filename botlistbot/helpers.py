@@ -1,12 +1,12 @@
-from random import random
-
+import asyncio
 import logging
-from telegram.ext import JobQueue, Job, run_async
-from typing import *
 import re
+from typing import List, Union
 
-import maya
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, Message, Bot
+import arrow
+from logzero import logger as log
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from telegram.constants import ParseMode
 
 from botlistbot import captions
 from botlistbot import settings
@@ -15,12 +15,9 @@ from botlistbot.custom_botlistbot import BotListBot
 from botlistbot.dialog import messages
 from botlistbot.settings import SELF_CHANNEL_USERNAME
 
-from logzero import logger as log
-
 
 def slang_datetime(dt) -> str:
-    maya_date = maya.MayaDT(dt.timestamp())
-    return maya_date.slang_time()
+    return arrow.get(dt).humanize()
 
 
 def find_bots_in_text(text: str, first=False):
@@ -87,8 +84,8 @@ def format_keyword(kw):
     return kw
 
 
-def reroute_private_chat(
-    bot, update, quote, action, message, redirect_message=None, reply_markup=None
+async def reroute_private_chat(
+    update, context, quote, action, message, redirect_message=None, reply_markup=None
 ):
     cid = update.effective_chat.id
     mid = util.mid_from_update(update)
@@ -96,7 +93,7 @@ def reroute_private_chat(
         redirect_message = messages.REROUTE_PRIVATE_CHAT
 
     if util.is_group_message(update):
-        update.message.reply_text(
+        await update.message.reply_text(
             redirect_message,
             quote=quote,
             parse_mode=ParseMode.MARKDOWN,
@@ -110,7 +107,7 @@ def reroute_private_chat(
                             ),
                         ),
                         InlineKeyboardButton(
-                            "🔎 Switch to inline", switch_inline_query=action
+                            "\U0001f50e Switch to inline", switch_inline_query=action
                         ),
                     ]
                 ]
@@ -118,9 +115,9 @@ def reroute_private_chat(
         )
     else:
         if mid:
-            bot.formatter.send_or_edit(cid, message, mid, reply_markup=reply_markup)
+            await context.bot.formatter.send_or_edit(cid, message, mid, reply_markup=reply_markup)
         else:
-            update.message.reply_text(
+            await update.message.reply_text(
                 message,
                 quote=quote,
                 parse_mode=ParseMode.MARKDOWN,
@@ -130,52 +127,17 @@ def reroute_private_chat(
 
 def make_sticker(filename, out_file, max_height=512, transparent=True):
     return  # TODO: fix
-    from PIL import Image
-
-    image = Image.open(filename)
-
-    # resize sticker to match new max height
-    # optimize image dimensions for stickers
-    if max_height == 512:
-        resize_ratio = min(512 / image.width, 512 / image.height)
-        image = image.resize(
-            (int(image.width * resize_ratio), int(image.height * resize_ratio))
-        )
-    else:
-        image.thumbnail((512, max_height), Image.ANTIALIAS)
-
-    if transparent:
-        canvas = Image.new("RGBA", (512, image.height))
-    else:
-        canvas = Image.new("RGB", (512, image.height), color="white")
-
-    pos = (0, 0)
-    try:
-        canvas.paste(image, pos, mask=image)
-    except ValueError:
-        canvas.paste(image, pos)
-
-    canvas.save(out_file)
-    return out_file
 
 
-@run_async
-def try_delete_after(
-    job_queue: JobQueue,
-    messages: Union[List[Union[Message, int]], Union[Message, int]],
-    delay: Union[float, int],
-):
+async def try_delete_after(context, messages: Union[List[Union[Message, int]], Union[Message, int]], delay: Union[float, int]):
     if isinstance(messages, (Message, int)):
         _messages = [messages]
     else:
         _messages = messages
 
-    @run_async
-    def delete_messages(*args, **kwargs):
-        # noinspection PyTypeChecker
-        bot: BotListBot = job_queue.bot
+    async def delete_messages(ctx):
+        bot: BotListBot = ctx.bot
         for m in _messages:
-            bot.delete_message(m.chat_id, m.message_id, timeout=10, safe=True)
+            await bot.delete_message(m.chat_id, m.message_id, safe=True)
 
-    job_queue.run_once(delete_messages, delay, name="try_delete_after")
-
+    context.job_queue.run_once(delete_messages, delay, name="try_delete_after")

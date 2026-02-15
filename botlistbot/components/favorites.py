@@ -1,7 +1,7 @@
+import asyncio
 import datetime
 import logging
 import re
-import threading
 
 from telegram import ForceReply
 from telegram import InlineKeyboardButton
@@ -26,13 +26,13 @@ logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
 log = logging.getLogger(__name__)
 
 
-def add_favorite_handler(bot, update, args=None):
+async def add_favorite_handler(update, context):
     uid = util.uid_from_update(update)
     from botlistbot.components.basic import main_menu_buttons
     main_menu_markup = ReplyKeyboardMarkup(main_menu_buttons(uid in settings.MODERATORS))
 
-    if args:
-        query = ' '.join(args) if isinstance(args, list) else args
+    if context.args:
+        query = ' '.join(context.args) if isinstance(context.args, list) else context.args
         try:
             # TODO: add multiple
             username = re.match(settings.REGEX_BOT_IN_TEXT, query).groups()[0]
@@ -40,7 +40,7 @@ def add_favorite_handler(bot, update, args=None):
                 # TODO: get exact database matches for input without `@`
                 item = Bot.by_username(username, include_disabled=True)
 
-                return add_favorite(bot, update, item)
+                return await add_favorite(update, context, item)
             except Bot.DoesNotExist:
                 buttons = [
                     InlineKeyboardButton(
@@ -48,14 +48,14 @@ def add_favorite_handler(bot, update, args=None):
                     InlineKeyboardButton("Nay...", callback_data=util.callback_for_action(CallbackActions.ADD_FAVORITE))
                 ]
                 reply_markup = InlineKeyboardMarkup([buttons])
-                util.send_md_message(bot, uid,
+                await util.send_md_message(context.bot, uid,
                                      "{} is not in the @BotList. Do you want to add it to your {} anyway?".format(
                                          username, captions.FAVORITES),
                                      reply_markup=reply_markup)
         except AttributeError:
             # invalid bot username
             # TODO when does this happen?
-            update.message.reply_text(
+            await update.message.reply_text(
                 util.failure("Sorry, but that is not a valid username. Please try again. /addfav"))
     else:
         buttons = [
@@ -63,11 +63,11 @@ def add_favorite_handler(bot, update, args=None):
         ]
         reply_markup = InlineKeyboardMarkup([buttons])
 
-        bot.sendMessage(uid, messages.ADD_FAVORITE, reply_markup=ForceReply(selective=True))
+        await context.bot.send_message(uid, messages.ADD_FAVORITE, reply_markup=ForceReply(selective=True))
     return ConversationHandler.END
 
 
-def add_favorite(bot, update, item: Bot, callback_alert=None):
+async def add_favorite(update, context, item: Bot, callback_alert=None):
     user = User.from_update(update)
     uid = util.uid_from_update(update)
     mid = util.mid_from_update(update)
@@ -79,29 +79,28 @@ def add_favorite(bot, update, item: Bot, callback_alert=None):
         Statistic.of(user, 'add-favorite', item.username)
         text = mdformat.love("{} added to your {}favorites.".format(fav.bot, '' if callback_alert else '/'))
         if callback_alert:
-            update.callback_query.answer(text=text, show_alert=False)
+            await update.callback_query.answer(text=text, show_alert=False)
         else:
-            msg = util.send_md_message(bot, uid, text, to_edit=mid, reply_markup=main_menu_markup)
+            msg = await util.send_md_message(context.bot, uid, text, to_edit=mid, reply_markup=main_menu_markup)
             mid = msg.message_id
-            util.wait(bot, update)
-            send_favorites_list(bot, update, to_edit=mid)
+            await util.wait(update, context)
+            await send_favorites_list(update, context, to_edit=mid)
     else:
         text = mdformat.none_action(
             "{} is already a favorite of yours.{}".format(fav.bot, '' if callback_alert else ' /favorites'))
         if callback_alert:
-            update.callback_query.answer(text=text, show_alert=False)
+            await update.callback_query.answer(text=text, show_alert=False)
         else:
-            util.send_md_message(bot, uid, text, reply_markup=main_menu_markup)
+            await util.send_md_message(context.bot, uid, text, reply_markup=main_menu_markup)
     return ConversationHandler.END
 
 
 @track_activity('view-favorites', level=Statistic.ANALYSIS)
-def send_favorites_list(bot, update, to_edit=None):
+async def send_favorites_list(update, context, to_edit=None):
     uid = util.uid_from_update(update)
     user = User.from_update(update)
 
-    t = threading.Thread(target=_too_many_favorites_handler, args=(bot, update, user))
-    t.start()
+    asyncio.create_task(_too_many_favorites_handler(update, context, user))
 
     favorites = Favorite.select_all(user)
 
@@ -132,17 +131,17 @@ def send_favorites_list(bot, update, to_edit=None):
     else:
         text = _favorites_categories_md(favorites, user.favorites_layout)
 
-    bot.formatter.send_or_edit(uid, text,
+    await context.bot.formatter.send_or_edit(uid, text,
                                  to_edit=to_edit, reply_markup=reply_markup)
 
 
 @track_activity('toggled their favorites layout', level=Statistic.ANALYSIS)
-def toggle_favorites_layout(bot, update, value):
+async def toggle_favorites_layout(update, context, value):
     uid = util.uid_from_update(update)
     user = User.from_update(update)
     user.favorites_layout = value
     user.save()
-    send_favorites_list(bot, update)
+    await send_favorites_list(update, context)
 
 
 def _favorites_categories_md(favorites, layout=None):
@@ -194,7 +193,7 @@ def _favorites_categories_md(favorites, layout=None):
 
 
 @track_activity('menu', 'remove favorite', Statistic.DETAILED)
-def remove_favorite_menu(bot, update):
+async def remove_favorite_menu(update, context):
     uid = util.uid_from_update(update)
     user = User.from_update(update)
     favorites = Favorite.select_all(user)
@@ -208,12 +207,12 @@ def remove_favorite_menu(bot, update):
                              callback_data=util.callback_for_action(CallbackActions.SEND_FAVORITES_LIST))
     ])
     reply_markup = InlineKeyboardMarkup(buttons)
-    bot.formatter.send_or_edit(uid, util.action_hint("Select favorites to remove"),
+    await context.bot.formatter.send_or_edit(uid, util.action_hint("Select favorites to remove"),
                                  to_edit=util.mid_from_update(update),
                                  reply_markup=reply_markup)
 
 
-def _too_many_favorites_handler(bot, update, user):
+async def _too_many_favorites_handler(update, context, user):
     uid = util.uid_from_update(update)
     any_removed = False
     while too_many_favorites(user):
@@ -224,7 +223,7 @@ def _too_many_favorites_handler(bot, update, user):
     if any_removed:
         txt = "You have too many favorites, _they do not fit into a single message_. That's why I removed your " \
               "oldest bot, *{}*, from your list of favorites.".format(oldest.bot if oldest.bot else oldest.custom_bot)
-        util.send_md_message(bot, uid, txt)
+        await util.send_md_message(context.bot, uid, txt)
 
 
 def too_many_favorites(user):
@@ -234,7 +233,7 @@ def too_many_favorites(user):
     return message_length > 4096
 
 
-def add_custom(bot, update, username):
+async def add_custom(update, context, username):
     uid = util.uid_from_update(update)
     user = User.from_update(update)
     mid = util.mid_from_update(update)
@@ -243,20 +242,18 @@ def add_custom(bot, update, username):
 
     try:
         fav = Favorite.get(custom_bot=username)
-        util.send_or_edit_md_message(
-            bot, uid, mdformat.none_action(
+        await util.send_or_edit_md_message(
+            context.bot, uid, mdformat.none_action(
                 "{} is already a favorite of yours. /favorites".format(fav.custom_bot)),
             to_edit=mid,
             reply_markup=main_menu_markup)
     except Favorite.DoesNotExist:
         fav = Favorite(user=user, custom_bot=username, date_added=datetime.date.today())
         fav.save()
-        msg = bot.formatter.send_or_edit(uid,
+        msg = await context.bot.formatter.send_or_edit(uid,
                                            mdformat.love("{} added to your /favorites.".format(fav.custom_bot)),
                                            to_edit=mid)
         mid = msg.message_id
-        util.wait(bot, update)
-        send_favorites_list(bot, update, to_edit=mid)
+        await util.wait(update, context)
+        await send_favorites_list(update, context, to_edit=mid)
     return ConversationHandler.END
-
-

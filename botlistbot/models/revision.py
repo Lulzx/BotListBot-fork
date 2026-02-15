@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-from functools import lru_cache
-
 from peewee import *
 
 from botlistbot.models.basemodel import BaseModel
